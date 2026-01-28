@@ -1,56 +1,23 @@
-import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { useLoaderData, useActionData, useSubmit, useNavigation } from "@remix-run/react";
-import {
-  Page,
-  Layout,
-  Card,
-  BlockStack,
-  Text,
-  InlineStack,
-  Badge,
-  Button,
-  Modal,
-  TextField,
-  Select,
-  Banner,
-  DescriptionList,
-  Divider,
-  Box,
-  DataTable,
-  Thumbnail,
-  ButtonGroup,
-} from "@shopify/polaris";
-import { useState, useCallback } from "react";
+import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
+import { useLoaderData, useSubmit, useNavigation, redirect } from "react-router";
+import { useState } from "react";
 import { authenticate } from "../shopify.server";
 
-// Detailed subscription query
 const SUBSCRIPTION_QUERY = `
   query SubscriptionContract($id: ID!) {
     subscriptionContract(id: $id) {
       id
       status
       createdAt
-      updatedAt
       nextBillingDate
       currencyCode
-      note
       lastPaymentStatus
-      lastBillingErrorType
       customer {
         id
         email
         firstName
         lastName
         phone
-        defaultAddress {
-          address1
-          address2
-          city
-          province
-          country
-          zip
-        }
       }
       customerPaymentMethod {
         id
@@ -74,13 +41,8 @@ const SUBSCRIPTION_QUERY = `
             province
             country
             zip
-            phone
           }
         }
-      }
-      deliveryPrice {
-        amount
-        currencyCode
       }
       lines(first: 20) {
         edges {
@@ -88,16 +50,10 @@ const SUBSCRIPTION_QUERY = `
             id
             title
             variantTitle
-            variantId
-            productId
             quantity
             currentPrice {
               amount
               currencyCode
-            }
-            variantImage {
-              url
-              altText
             }
           }
         }
@@ -105,14 +61,8 @@ const SUBSCRIPTION_QUERY = `
       billingPolicy {
         intervalCount
         interval
-        minCycles
-        maxCycles
       }
-      deliveryPolicy {
-        intervalCount
-        interval
-      }
-      orders(first: 10) {
+      orders(first: 5) {
         edges {
           node {
             id
@@ -124,22 +74,6 @@ const SUBSCRIPTION_QUERY = `
                 currencyCode
               }
             }
-            displayFulfillmentStatus
-            displayFinancialStatus
-          }
-        }
-      }
-      billingAttempts(first: 5) {
-        edges {
-          node {
-            id
-            createdAt
-            ready
-            errorMessage
-            order {
-              id
-              name
-            }
           }
         }
       }
@@ -147,18 +81,11 @@ const SUBSCRIPTION_QUERY = `
   }
 `;
 
-// Mutations
 const PAUSE_MUTATION = `
   mutation SubscriptionContractPause($subscriptionContractId: ID!) {
     subscriptionContractPause(subscriptionContractId: $subscriptionContractId) {
-      contract {
-        id
-        status
-      }
-      userErrors {
-        field
-        message
-      }
+      contract { id status }
+      userErrors { field message }
     }
   }
 `;
@@ -166,14 +93,8 @@ const PAUSE_MUTATION = `
 const ACTIVATE_MUTATION = `
   mutation SubscriptionContractActivate($subscriptionContractId: ID!) {
     subscriptionContractActivate(subscriptionContractId: $subscriptionContractId) {
-      contract {
-        id
-        status
-      }
-      userErrors {
-        field
-        message
-      }
+      contract { id status }
+      userErrors { field message }
     }
   }
 `;
@@ -181,32 +102,8 @@ const ACTIVATE_MUTATION = `
 const CANCEL_MUTATION = `
   mutation SubscriptionContractCancel($subscriptionContractId: ID!) {
     subscriptionContractCancel(subscriptionContractId: $subscriptionContractId) {
-      contract {
-        id
-        status
-      }
-      userErrors {
-        field
-        message
-      }
-    }
-  }
-`;
-
-const SET_NEXT_BILLING_DATE_MUTATION = `
-  mutation SetNextBillingDate($subscriptionContractId: ID!, $date: DateTime!) {
-    subscriptionContractSetNextBillingDate(
-      subscriptionContractId: $subscriptionContractId
-      date: $date
-    ) {
-      contract {
-        id
-        nextBillingDate
-      }
-      userErrors {
-        field
-        message
-      }
+      contract { id status }
+      userErrors { field message }
     }
   }
 `;
@@ -215,9 +112,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const { id } = params;
 
-  if (!id) {
-    throw new Response("Subscription ID required", { status: 400 });
-  }
+  if (!id) throw new Response("ID required", { status: 400 });
 
   const response = await admin.graphql(SUBSCRIPTION_QUERY, {
     variables: { id: decodeURIComponent(id) },
@@ -226,11 +121,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const data = await response.json();
   const subscription = data.data?.subscriptionContract;
 
-  if (!subscription) {
-    throw new Response("Subscription not found", { status: 404 });
-  }
+  if (!subscription) throw new Response("Not found", { status: 404 });
 
-  return json({ subscription });
+  return { subscription };
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -239,86 +132,59 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const intent = formData.get("intent");
 
-  if (!id) {
-    return json({ error: "Subscription ID required" }, { status: 400 });
-  }
+  if (!id) return { error: "ID required" };
 
   const subscriptionContractId = decodeURIComponent(id);
+  let mutation: string;
 
-  try {
-    let mutation: string;
-    let variables: Record<string, any> = { subscriptionContractId };
-
-    switch (intent) {
-      case "pause":
-        mutation = PAUSE_MUTATION;
-        break;
-      case "activate":
-        mutation = ACTIVATE_MUTATION;
-        break;
-      case "cancel":
-        mutation = CANCEL_MUTATION;
-        break;
-      case "setNextBillingDate":
-        const date = formData.get("date") as string;
-        mutation = SET_NEXT_BILLING_DATE_MUTATION;
-        variables = { subscriptionContractId, date };
-        break;
-      default:
-        return json({ error: "Unknown action" }, { status: 400 });
-    }
-
-    const response = await admin.graphql(mutation, { variables });
-    const result = await response.json();
-
-    // Check for user errors
-    const mutationResult = Object.values(result.data || {})[0] as any;
-    if (mutationResult?.userErrors?.length > 0) {
-      return json({
-        error: mutationResult.userErrors.map((e: any) => e.message).join(", "),
-      });
-    }
-
-    return json({ success: true, intent });
-  } catch (error: any) {
-    return json({ error: error.message || "An error occurred" });
+  switch (intent) {
+    case "pause":
+      mutation = PAUSE_MUTATION;
+      break;
+    case "activate":
+      mutation = ACTIVATE_MUTATION;
+      break;
+    case "cancel":
+      mutation = CANCEL_MUTATION;
+      break;
+    default:
+      return { error: "Unknown action" };
   }
+
+  const response = await admin.graphql(mutation, {
+    variables: { subscriptionContractId },
+  });
+
+  const result = await response.json();
+  const mutationResult = Object.values(result.data || {})[0] as any;
+
+  if (mutationResult?.userErrors?.length > 0) {
+    return { error: mutationResult.userErrors.map((e: any) => e.message).join(", ") };
+  }
+
+  return { success: true, intent };
 };
 
 export default function SubscriptionDetailPage() {
   const { subscription } = useLoaderData<typeof loader>();
-  const actionData = useActionData<typeof action>();
   const submit = useSubmit();
   const navigation = useNavigation();
-  
-  const [showCancelModal, setShowCancelModal] = useState(false);
-  const [showDateModal, setShowDateModal] = useState(false);
-  const [newBillingDate, setNewBillingDate] = useState("");
+  const [showCancel, setShowCancel] = useState(false);
 
   const isSubmitting = navigation.state === "submitting";
 
-  const handleAction = useCallback(
-    (intent: string, additionalData?: Record<string, string>) => {
-      const formData = new FormData();
-      formData.append("intent", intent);
-      if (additionalData) {
-        Object.entries(additionalData).forEach(([key, value]) => {
-          formData.append(key, value);
-        });
-      }
-      submit(formData, { method: "post" });
-    },
-    [submit]
-  );
+  const handleAction = (intent: string) => {
+    const formData = new FormData();
+    formData.append("intent", intent);
+    submit(formData, { method: "post" });
+  };
 
-  const formatCurrency = (amount: string | number, currency: string = "CAD") => {
-    return new Intl.NumberFormat("fr-CA", {
-      style: "currency",
-      currency,
-    }).format(Number(amount));
+  const formatCurrency = (amount: string | number, currency = "CAD") => {
+    return new Intl.NumberFormat("fr-CA", { style: "currency", currency }).format(Number(amount));
   };
 
   const formatDate = (dateString: string) => {
+    if (!dateString) return "—";
     return new Date(dateString).toLocaleDateString("fr-CA", {
       year: "numeric",
       month: "long",
@@ -326,344 +192,213 @@ export default function SubscriptionDetailPage() {
     });
   };
 
-  const formatDateTime = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("fr-CA", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
-  const getStatusBadge = (status: string) => {
-    const statusMap: Record<string, { tone: "success" | "warning" | "critical" | "info"; label: string }> = {
-      ACTIVE: { tone: "success", label: "Actif" },
-      PAUSED: { tone: "warning", label: "En pause" },
-      CANCELLED: { tone: "critical", label: "Annulé" },
-      FAILED: { tone: "critical", label: "Échoué" },
-      EXPIRED: { tone: "info", label: "Expiré" },
-    };
-    const config = statusMap[status] || { tone: "info", label: status };
-    return <Badge tone={config.tone}>{config.label}</Badge>;
-  };
-
   const customer = subscription.customer;
   const lines = subscription.lines?.edges || [];
   const orders = subscription.orders?.edges || [];
-  const billingAttempts = subscription.billingAttempts?.edges || [];
   const paymentMethod = subscription.customerPaymentMethod?.instrument;
-  const deliveryAddress = subscription.deliveryMethod?.address;
+  const address = subscription.deliveryMethod?.address;
 
   const interval = subscription.billingPolicy?.interval || "MONTH";
   const intervalCount = subscription.billingPolicy?.intervalCount || 1;
   const intervalLabel = {
-    WEEK: intervalCount === 1 ? "semaine" : `${intervalCount} semaines`,
-    MONTH: intervalCount === 1 ? "mois" : `${intervalCount} mois`,
-    YEAR: intervalCount === 1 ? "an" : `${intervalCount} ans`,
+    WEEK: `${intervalCount} semaine(s)`,
+    MONTH: `${intervalCount} mois`,
+    YEAR: `${intervalCount} an(s)`,
   }[interval] || interval;
 
-  const totalLinePrice = lines.reduce((sum: number, edge: any) => {
-    const line = edge.node;
-    return sum + (parseFloat(line.currentPrice?.amount || 0) * (line.quantity || 1));
+  const totalPrice = lines.reduce((sum: number, e: any) => {
+    return sum + parseFloat(e.node.currentPrice?.amount || 0) * (e.node.quantity || 1);
   }, 0);
 
+  const statusTones: Record<string, string> = {
+    ACTIVE: "success",
+    PAUSED: "warning",
+    CANCELLED: "critical",
+    FAILED: "critical",
+  };
+
+  const statusLabels: Record<string, string> = {
+    ACTIVE: "Actif",
+    PAUSED: "En pause",
+    CANCELLED: "Annulé",
+    FAILED: "Échoué",
+  };
+
   return (
-    <Page
-      backAction={{ content: "Abonnements", url: "/app/subscriptions" }}
-      title={`Abonnement - ${customer?.email || "Client"}`}
-      titleMetadata={getStatusBadge(subscription.status)}
-      secondaryActions={[
-        {
-          content: subscription.status === "PAUSED" ? "Réactiver" : "Mettre en pause",
-          disabled: !["ACTIVE", "PAUSED"].includes(subscription.status) || isSubmitting,
-          onAction: () => {
-            handleAction(subscription.status === "PAUSED" ? "activate" : "pause");
-          },
-        },
-        {
-          content: "Modifier la date",
-          disabled: subscription.status !== "ACTIVE" || isSubmitting,
-          onAction: () => setShowDateModal(true),
-        },
-        {
-          content: "Annuler",
-          destructive: true,
-          disabled: ["CANCELLED", "EXPIRED"].includes(subscription.status) || isSubmitting,
-          onAction: () => setShowCancelModal(true),
-        },
-      ]}
+    <s-page
+      heading={`Abonnement - ${customer?.email || "Client"}`}
+      backAction={{ url: "/app/subscriptions" }}
     >
-      <Layout>
-        {actionData?.error && (
-          <Layout.Section>
-            <Banner tone="critical" title="Erreur">
-              {actionData.error}
-            </Banner>
-          </Layout.Section>
-        )}
+      {/* Status Badge */}
+      <s-section>
+        <s-badge tone={statusTones[subscription.status] || "info"}>
+          {statusLabels[subscription.status] || subscription.status}
+        </s-badge>
+      </s-section>
 
-        {actionData?.success && (
-          <Layout.Section>
-            <Banner tone="success" title="Succès">
-              L'action a été effectuée avec succès.
-            </Banner>
-          </Layout.Section>
-        )}
-
-        <Layout.Section>
-          {/* Subscription Overview */}
-          <Card>
-            <BlockStack gap="400">
-              <Text as="h2" variant="headingMd">
-                Détails de l'abonnement
-              </Text>
-              <Divider />
-              <DescriptionList
-                items={[
-                  {
-                    term: "Fréquence",
-                    description: `Chaque ${intervalLabel}`,
-                  },
-                  {
-                    term: "Prochaine facturation",
-                    description: subscription.nextBillingDate
-                      ? formatDate(subscription.nextBillingDate)
-                      : "Non définie",
-                  },
-                  {
-                    term: "Créé le",
-                    description: formatDateTime(subscription.createdAt),
-                  },
-                  {
-                    term: "Dernier paiement",
-                    description: subscription.lastPaymentStatus || "N/A",
-                  },
-                ]}
-              />
-            </BlockStack>
-          </Card>
-
-          {/* Line Items */}
-          <Card>
-            <BlockStack gap="400">
-              <Text as="h2" variant="headingMd">
-                Produits ({lines.length})
-              </Text>
-              <Divider />
-              {lines.map((edge: any) => {
-                const line = edge.node;
-                return (
-                  <InlineStack key={line.id} gap="400" blockAlign="center">
-                    {line.variantImage?.url && (
-                      <Thumbnail
-                        source={line.variantImage.url}
-                        alt={line.variantImage.altText || line.title}
-                        size="small"
-                      />
-                    )}
-                    <BlockStack gap="100">
-                      <Text as="span" fontWeight="semibold">
-                        {line.title}
-                      </Text>
-                      {line.variantTitle && (
-                        <Text as="span" tone="subdued" variant="bodySm">
-                          {line.variantTitle}
-                        </Text>
-                      )}
-                    </BlockStack>
-                    <Box>
-                      <Text as="span">
-                        {line.quantity} × {formatCurrency(line.currentPrice?.amount, subscription.currencyCode)}
-                      </Text>
-                    </Box>
-                  </InlineStack>
-                );
-              })}
-              <Divider />
-              <InlineStack align="space-between">
-                <Text as="span" fontWeight="semibold">
-                  Total par livraison
-                </Text>
-                <Text as="span" fontWeight="bold">
-                  {formatCurrency(totalLinePrice, subscription.currencyCode)}
-                </Text>
-              </InlineStack>
-            </BlockStack>
-          </Card>
-
-          {/* Order History */}
-          <Card>
-            <BlockStack gap="400">
-              <Text as="h2" variant="headingMd">
-                Historique des commandes
-              </Text>
-              <Divider />
-              {orders.length > 0 ? (
-                <DataTable
-                  columnContentTypes={["text", "text", "numeric", "text", "text"]}
-                  headings={["Commande", "Date", "Total", "Paiement", "Livraison"]}
-                  rows={orders.map((edge: any) => {
-                    const order = edge.node;
-                    return [
-                      order.name,
-                      formatDate(order.createdAt),
-                      formatCurrency(
-                        order.totalPriceSet?.shopMoney?.amount || 0,
-                        order.totalPriceSet?.shopMoney?.currencyCode
-                      ),
-                      order.displayFinancialStatus,
-                      order.displayFulfillmentStatus,
-                    ];
-                  })}
-                />
-              ) : (
-                <Text as="p" tone="subdued">
-                  Aucune commande pour cet abonnement.
-                </Text>
-              )}
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-
-        <Layout.Section variant="oneThird">
-          {/* Customer Info */}
-          <Card>
-            <BlockStack gap="400">
-              <Text as="h2" variant="headingMd">
-                Client
-              </Text>
-              <Divider />
-              <DescriptionList
-                items={[
-                  {
-                    term: "Nom",
-                    description: `${customer?.firstName || ""} ${customer?.lastName || ""}`.trim() || "N/A",
-                  },
-                  {
-                    term: "Email",
-                    description: customer?.email || "N/A",
-                  },
-                  {
-                    term: "Téléphone",
-                    description: customer?.phone || "N/A",
-                  },
-                ]}
-              />
-            </BlockStack>
-          </Card>
-
-          {/* Delivery Address */}
-          {deliveryAddress && (
-            <Card>
-              <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">
-                  Adresse de livraison
-                </Text>
-                <Divider />
-                <Text as="p">
-                  {deliveryAddress.firstName} {deliveryAddress.lastName}
-                  <br />
-                  {deliveryAddress.address1}
-                  {deliveryAddress.address2 && <><br />{deliveryAddress.address2}</>}
-                  <br />
-                  {deliveryAddress.city}, {deliveryAddress.province} {deliveryAddress.zip}
-                  <br />
-                  {deliveryAddress.country}
-                </Text>
-              </BlockStack>
-            </Card>
+      {/* Actions */}
+      <s-section>
+        <s-box display="flex" gap="200">
+          {subscription.status === "ACTIVE" && (
+            <s-button onClick={() => handleAction("pause")} disabled={isSubmitting}>
+              Mettre en pause
+            </s-button>
           )}
-
-          {/* Payment Method */}
-          {paymentMethod && (
-            <Card>
-              <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">
-                  Mode de paiement
-                </Text>
-                <Divider />
-                <Text as="p">
-                  {paymentMethod.brand} •••• {paymentMethod.lastDigits}
-                  <br />
-                  Exp. {paymentMethod.expiryMonth}/{paymentMethod.expiryYear}
-                </Text>
-              </BlockStack>
-            </Card>
+          {subscription.status === "PAUSED" && (
+            <s-button variant="primary" onClick={() => handleAction("activate")} disabled={isSubmitting}>
+              Réactiver
+            </s-button>
           )}
-        </Layout.Section>
-      </Layout>
+          {!["CANCELLED", "EXPIRED"].includes(subscription.status) && (
+            <s-button tone="critical" onClick={() => setShowCancel(true)} disabled={isSubmitting}>
+              Annuler
+            </s-button>
+          )}
+        </s-box>
+      </s-section>
 
-      {/* Cancel Modal */}
-      <Modal
-        open={showCancelModal}
-        onClose={() => setShowCancelModal(false)}
-        title="Annuler l'abonnement"
-        primaryAction={{
-          content: "Confirmer l'annulation",
-          destructive: true,
-          loading: isSubmitting,
-          onAction: () => {
-            handleAction("cancel");
-            setShowCancelModal(false);
-          },
-        }}
-        secondaryActions={[
-          {
-            content: "Annuler",
-            onAction: () => setShowCancelModal(false),
-          },
-        ]}
-      >
-        <Modal.Section>
-          <BlockStack gap="400">
-            <Banner tone="warning">
-              Cette action est irréversible. Le client devra créer un nouvel abonnement s'il souhaite reprendre.
-            </Banner>
-            <Text as="p">
-              Êtes-vous sûr de vouloir annuler cet abonnement pour{" "}
-              <strong>{customer?.email}</strong>?
-            </Text>
-          </BlockStack>
-        </Modal.Section>
-      </Modal>
+      {/* Subscription Details */}
+      <s-section heading="Détails">
+        <s-card>
+          <s-description-list>
+            <s-description-list-item term="Fréquence">
+              Chaque {intervalLabel}
+            </s-description-list-item>
+            <s-description-list-item term="Prochaine facturation">
+              {formatDate(subscription.nextBillingDate)}
+            </s-description-list-item>
+            <s-description-list-item term="Créé le">
+              {formatDate(subscription.createdAt)}
+            </s-description-list-item>
+            <s-description-list-item term="Dernier paiement">
+              {subscription.lastPaymentStatus || "N/A"}
+            </s-description-list-item>
+          </s-description-list>
+        </s-card>
+      </s-section>
 
-      {/* Change Billing Date Modal */}
-      <Modal
-        open={showDateModal}
-        onClose={() => setShowDateModal(false)}
-        title="Modifier la date de facturation"
-        primaryAction={{
-          content: "Enregistrer",
-          loading: isSubmitting,
-          disabled: !newBillingDate,
-          onAction: () => {
-            handleAction("setNextBillingDate", { date: new Date(newBillingDate).toISOString() });
-            setShowDateModal(false);
-            setNewBillingDate("");
-          },
-        }}
-        secondaryActions={[
-          {
-            content: "Annuler",
+      {/* Products */}
+      <s-section heading={`Produits (${lines.length})`}>
+        <s-card>
+          {lines.map((edge: any) => {
+            const line = edge.node;
+            return (
+              <s-box key={line.id} padding="300" display="flex" justify="space-between">
+                <s-box>
+                  <s-text fontWeight="semibold">{line.title}</s-text>
+                  {line.variantTitle && (
+                    <s-text variant="bodySm" tone="subdued">{line.variantTitle}</s-text>
+                  )}
+                </s-box>
+                <s-text>
+                  {line.quantity} × {formatCurrency(line.currentPrice?.amount, subscription.currencyCode)}
+                </s-text>
+              </s-box>
+            );
+          })}
+          <s-divider />
+          <s-box padding="300" display="flex" justify="space-between">
+            <s-text fontWeight="bold">Total par livraison</s-text>
+            <s-text fontWeight="bold">{formatCurrency(totalPrice, subscription.currencyCode)}</s-text>
+          </s-box>
+        </s-card>
+      </s-section>
+
+      {/* Customer */}
+      <s-section heading="Client">
+        <s-card>
+          <s-description-list>
+            <s-description-list-item term="Nom">
+              {customer?.firstName} {customer?.lastName}
+            </s-description-list-item>
+            <s-description-list-item term="Email">
+              {customer?.email}
+            </s-description-list-item>
+            <s-description-list-item term="Téléphone">
+              {customer?.phone || "N/A"}
+            </s-description-list-item>
+          </s-description-list>
+        </s-card>
+      </s-section>
+
+      {/* Delivery Address */}
+      {address && (
+        <s-section heading="Adresse de livraison">
+          <s-card>
+            <s-box padding="300">
+              <s-text>{address.firstName} {address.lastName}</s-text>
+              <s-text>{address.address1}</s-text>
+              {address.address2 && <s-text>{address.address2}</s-text>}
+              <s-text>{address.city}, {address.province} {address.zip}</s-text>
+              <s-text>{address.country}</s-text>
+            </s-box>
+          </s-card>
+        </s-section>
+      )}
+
+      {/* Payment Method */}
+      {paymentMethod && (
+        <s-section heading="Mode de paiement">
+          <s-card>
+            <s-box padding="300">
+              <s-text>{paymentMethod.brand} •••• {paymentMethod.lastDigits}</s-text>
+              <s-text variant="bodySm" tone="subdued">
+                Exp. {paymentMethod.expiryMonth}/{paymentMethod.expiryYear}
+              </s-text>
+            </s-box>
+          </s-card>
+        </s-section>
+      )}
+
+      {/* Order History */}
+      {orders.length > 0 && (
+        <s-section heading="Historique des commandes">
+          <s-card>
+            {orders.map((edge: any) => {
+              const order = edge.node;
+              return (
+                <s-box key={order.id} padding="300" display="flex" justify="space-between">
+                  <s-text>{order.name}</s-text>
+                  <s-box display="flex" gap="400">
+                    <s-text>{formatDate(order.createdAt)}</s-text>
+                    <s-text>{formatCurrency(order.totalPriceSet?.shopMoney?.amount)}</s-text>
+                  </s-box>
+                </s-box>
+              );
+            })}
+          </s-card>
+        </s-section>
+      )}
+
+      {/* Cancel Confirmation Modal */}
+      {showCancel && (
+        <s-modal
+          open
+          heading="Annuler l'abonnement"
+          onClose={() => setShowCancel(false)}
+          primaryAction={{
+            content: "Confirmer l'annulation",
+            destructive: true,
             onAction: () => {
-              setShowDateModal(false);
-              setNewBillingDate("");
+              handleAction("cancel");
+              setShowCancel(false);
             },
-          },
-        ]}
-      >
-        <Modal.Section>
-          <TextField
-            label="Nouvelle date de facturation"
-            type="date"
-            value={newBillingDate}
-            onChange={setNewBillingDate}
-            autoComplete="off"
-            helpText="La prochaine facturation aura lieu à cette date."
-          />
-        </Modal.Section>
-      </Modal>
-    </Page>
+          }}
+          secondaryAction={{
+            content: "Annuler",
+            onAction: () => setShowCancel(false),
+          }}
+        >
+          <s-box padding="400">
+            <s-banner tone="warning">
+              Cette action est irréversible.
+            </s-banner>
+            <s-text>
+              Êtes-vous sûr de vouloir annuler cet abonnement pour {customer?.email}?
+            </s-text>
+          </s-box>
+        </s-modal>
+      )}
+    </s-page>
   );
 }

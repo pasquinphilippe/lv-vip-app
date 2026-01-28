@@ -1,29 +1,5 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { useLoaderData, Link, useSearchParams } from "@remix-run/react";
-import {
-  Page,
-  Layout,
-  Card,
-  BlockStack,
-  Text,
-  InlineGrid,
-  Box,
-  Badge,
-  DataTable,
-  Pagination,
-  Filters,
-  ChoiceList,
-  Button,
-  EmptyState,
-  InlineStack,
-  Tooltip,
-  Icon,
-} from "@shopify/polaris";
-import { 
-  RefreshIcon,
-  CalendarIcon,
-} from "@shopify/polaris-icons";
+import type { LoaderFunctionArgs } from "react-router";
+import { useLoaderData, Link, useSearchParams } from "react-router";
 import { authenticate } from "../shopify.server";
 
 // GraphQL query for subscription contracts
@@ -45,10 +21,6 @@ const SUBSCRIPTIONS_QUERY = `
             firstName
             lastName
           }
-          deliveryPrice {
-            amount
-            currencyCode
-          }
           lines(first: 5) {
             edges {
               node {
@@ -67,37 +39,13 @@ const SUBSCRIPTIONS_QUERY = `
             intervalCount
             interval
           }
-          lastPaymentStatus
         }
       }
       pageInfo {
         hasNextPage
         hasPreviousPage
-        startCursor
         endCursor
       }
-    }
-  }
-`;
-
-// KPI aggregation query
-const KPI_QUERY = `
-  query SubscriptionKPIs {
-    activeContracts: subscriptionContracts(first: 1, query: "status:ACTIVE") {
-      edges { node { id } }
-      pageInfo { hasNextPage }
-    }
-    pausedContracts: subscriptionContracts(first: 1, query: "status:PAUSED") {
-      edges { node { id } }
-      pageInfo { hasNextPage }
-    }
-    cancelledContracts: subscriptionContracts(first: 1, query: "status:CANCELLED") {
-      edges { node { id } }
-      pageInfo { hasNextPage }
-    }
-    failedContracts: subscriptionContracts(first: 1, query: "status:FAILED") {
-      edges { node { id } }
-      pageInfo { hasNextPage }
     }
   }
 `;
@@ -108,326 +56,216 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const status = url.searchParams.get("status") || "";
   const after = url.searchParams.get("after") || null;
-  const pageSize = 20;
 
-  // Build query filter
-  let queryFilter = "";
-  if (status) {
-    queryFilter = `status:${status}`;
-  }
+  let queryFilter = status ? `status:${status}` : null;
 
-  // Fetch subscriptions
-  const subscriptionsResponse = await admin.graphql(SUBSCRIPTIONS_QUERY, {
+  const response = await admin.graphql(SUBSCRIPTIONS_QUERY, {
     variables: {
-      first: pageSize,
+      first: 20,
       after,
-      query: queryFilter || null,
+      query: queryFilter,
     },
   });
-  const subscriptionsData = await subscriptionsResponse.json();
 
-  // Fetch KPIs (counts by status)
-  const kpiResponse = await admin.graphql(KPI_QUERY);
-  const kpiData = await kpiResponse.json();
+  const data = await response.json();
+  const subscriptions = data.data?.subscriptionContracts?.edges || [];
+  const pageInfo = data.data?.subscriptionContracts?.pageInfo || {};
 
-  // Calculate MRR from active subscriptions
-  // For now, we'll estimate from the first page
+  // Calculate stats
+  let activeCount = 0;
+  let pausedCount = 0;
   let estimatedMRR = 0;
-  const activeContracts = subscriptionsData.data?.subscriptionContracts?.edges || [];
-  
-  for (const edge of activeContracts) {
-    const contract = edge.node;
-    if (contract.status === "ACTIVE") {
-      const lines = contract.lines?.edges || [];
+
+  for (const edge of subscriptions) {
+    const sub = edge.node;
+    if (sub.status === "ACTIVE") {
+      activeCount++;
+      const lines = sub.lines?.edges || [];
       for (const lineEdge of lines) {
-        const line = lineEdge.node;
-        const price = parseFloat(line.currentPrice?.amount || 0);
-        const quantity = line.quantity || 1;
-        
-        // Normalize to monthly
-        const interval = contract.billingPolicy?.interval || "MONTH";
-        const intervalCount = contract.billingPolicy?.intervalCount || 1;
+        const price = parseFloat(lineEdge.node.currentPrice?.amount || 0);
+        const qty = lineEdge.node.quantity || 1;
+        const interval = sub.billingPolicy?.interval || "MONTH";
+        const intervalCount = sub.billingPolicy?.intervalCount || 1;
         
         let monthlyMultiplier = 1;
-        if (interval === "WEEK") {
-          monthlyMultiplier = 4 / intervalCount;
-        } else if (interval === "MONTH") {
-          monthlyMultiplier = 1 / intervalCount;
-        } else if (interval === "YEAR") {
-          monthlyMultiplier = 1 / (12 * intervalCount);
-        }
+        if (interval === "WEEK") monthlyMultiplier = 4 / intervalCount;
+        else if (interval === "MONTH") monthlyMultiplier = 1 / intervalCount;
         
-        estimatedMRR += price * quantity * monthlyMultiplier;
+        estimatedMRR += price * qty * monthlyMultiplier;
       }
+    } else if (sub.status === "PAUSED") {
+      pausedCount++;
     }
   }
 
-  return json({
-    subscriptions: subscriptionsData.data?.subscriptionContracts?.edges || [],
-    pageInfo: subscriptionsData.data?.subscriptionContracts?.pageInfo || {},
-    kpis: {
-      active: kpiData.data?.activeContracts?.edges?.length || 0,
-      paused: kpiData.data?.pausedContracts?.edges?.length || 0,
-      cancelled: kpiData.data?.cancelledContracts?.edges?.length || 0,
-      failed: kpiData.data?.failedContracts?.edges?.length || 0,
-      estimatedMRR,
-    },
+  return {
+    subscriptions,
+    pageInfo,
+    stats: { activeCount, pausedCount, estimatedMRR },
     filters: { status },
-  });
+  };
 };
 
 export default function SubscriptionsPage() {
-  const { subscriptions, pageInfo, kpis, filters } = useLoaderData<typeof loader>();
+  const { subscriptions, pageInfo, stats, filters } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const statusOptions = [
-    { label: "Tous", value: "" },
-    { label: "Actif", value: "ACTIVE" },
-    { label: "En pause", value: "PAUSED" },
-    { label: "Échoué", value: "FAILED" },
-    { label: "Annulé", value: "CANCELLED" },
-  ];
-
-  const handleStatusChange = (value: string[]) => {
-    const newParams = new URLSearchParams(searchParams);
-    if (value[0]) {
-      newParams.set("status", value[0]);
-    } else {
-      newParams.delete("status");
-    }
-    newParams.delete("after");
-    setSearchParams(newParams);
-  };
-
-  const handleNextPage = () => {
-    if (pageInfo.hasNextPage && pageInfo.endCursor) {
-      const newParams = new URLSearchParams(searchParams);
-      newParams.set("after", pageInfo.endCursor);
-      setSearchParams(newParams);
-    }
-  };
-
-  const getStatusBadge = (status: string) => {
-    const statusMap: Record<string, { tone: "success" | "warning" | "critical" | "info"; label: string }> = {
-      ACTIVE: { tone: "success", label: "Actif" },
-      PAUSED: { tone: "warning", label: "En pause" },
-      CANCELLED: { tone: "critical", label: "Annulé" },
-      FAILED: { tone: "critical", label: "Échoué" },
-      EXPIRED: { tone: "info", label: "Expiré" },
-    };
-    const config = statusMap[status] || { tone: "info", label: status };
-    return <Badge tone={config.tone}>{config.label}</Badge>;
-  };
-
-  const formatCurrency = (amount: string | number, currency: string = "CAD") => {
+  const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("fr-CA", {
       style: "currency",
-      currency,
-    }).format(Number(amount));
+      currency: "CAD",
+    }).format(amount);
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("fr-CA", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
+    if (!dateString) return "—";
+    return new Date(dateString).toLocaleDateString("fr-CA");
   };
 
-  const rows = subscriptions.map((edge: any) => {
-    const sub = edge.node;
-    const customer = sub.customer;
-    const lines = sub.lines?.edges || [];
-    const firstLine = lines[0]?.node;
-    
-    const totalPrice = lines.reduce((sum: number, l: any) => {
-      return sum + (parseFloat(l.node.currentPrice?.amount || 0) * (l.node.quantity || 1));
-    }, 0);
+  const getStatusBadge = (status: string) => {
+    const tones: Record<string, string> = {
+      ACTIVE: "success",
+      PAUSED: "warning",
+      CANCELLED: "critical",
+      FAILED: "critical",
+    };
+    const labels: Record<string, string> = {
+      ACTIVE: "Actif",
+      PAUSED: "En pause",
+      CANCELLED: "Annulé",
+      FAILED: "Échoué",
+    };
+    return <s-badge tone={tones[status] || "info"}>{labels[status] || status}</s-badge>;
+  };
 
-    const interval = sub.billingPolicy?.interval || "MONTH";
-    const intervalCount = sub.billingPolicy?.intervalCount || 1;
-    const intervalLabel = {
-      WEEK: intervalCount === 1 ? "semaine" : "semaines",
-      MONTH: "mois",
-      YEAR: intervalCount === 1 ? "an" : "ans",
-    }[interval] || interval;
-
-    return [
-      <Link to={`/app/subscriptions/${encodeURIComponent(sub.id)}`} key={sub.id}>
-        <Text as="span" fontWeight="semibold">
-          {customer?.email || "N/A"}
-        </Text>
-        <br />
-        <Text as="span" tone="subdued" variant="bodySm">
-          {customer?.firstName} {customer?.lastName}
-        </Text>
-      </Link>,
-      <BlockStack gap="100" key={`${sub.id}-products`}>
-        <Text as="span">{firstLine?.title || "N/A"}</Text>
-        {lines.length > 1 && (
-          <Text as="span" tone="subdued" variant="bodySm">
-            +{lines.length - 1} autre(s)
-          </Text>
-        )}
-      </BlockStack>,
-      getStatusBadge(sub.status),
-      `${intervalCount} ${intervalLabel}`,
-      formatCurrency(totalPrice, sub.currencyCode),
-      sub.nextBillingDate ? formatDate(sub.nextBillingDate) : "—",
-      <Button
-        key={`${sub.id}-action`}
-        url={`/app/subscriptions/${encodeURIComponent(sub.id)}`}
-        size="slim"
-      >
-        Gérer
-      </Button>,
-    ];
-  });
+  const handleFilterChange = (newStatus: string) => {
+    const params = new URLSearchParams(searchParams);
+    if (newStatus) {
+      params.set("status", newStatus);
+    } else {
+      params.delete("status");
+    }
+    params.delete("after");
+    setSearchParams(params);
+  };
 
   return (
-    <Page
-      title="Abonnements"
-      subtitle="Gérez les contrats d'abonnement de vos clients"
-      primaryAction={{
-        content: "Actualiser",
-        icon: RefreshIcon,
-        onAction: () => window.location.reload(),
-      }}
-    >
-      <BlockStack gap="500">
-        {/* KPI Cards */}
-        <InlineGrid columns={{ xs: 2, sm: 4, md: 5 }} gap="400">
-          <KPICard
-            title="Actifs"
-            value={kpis.active}
-            tone="success"
-          />
-          <KPICard
-            title="En pause"
-            value={kpis.paused}
-            tone="warning"
-          />
-          <KPICard
-            title="Échoués"
-            value={kpis.failed}
-            tone="critical"
-          />
-          <KPICard
-            title="Annulés"
-            value={kpis.cancelled}
-            tone="subdued"
-          />
-          <KPICard
-            title="MRR estimé"
-            value={formatCurrency(kpis.estimatedMRR)}
-            tone="magic"
-          />
-        </InlineGrid>
+    <s-page heading="Abonnements" subheading="Gérez les contrats d'abonnement">
+      {/* KPI Cards */}
+      <s-section>
+        <s-box display="flex" gap="400">
+          <s-card>
+            <s-box padding="400">
+              <s-text variant="bodySm" tone="subdued">Actifs</s-text>
+              <s-text variant="headingLg" fontWeight="bold">{stats.activeCount}</s-text>
+            </s-box>
+          </s-card>
+          <s-card>
+            <s-box padding="400">
+              <s-text variant="bodySm" tone="subdued">En pause</s-text>
+              <s-text variant="headingLg" fontWeight="bold">{stats.pausedCount}</s-text>
+            </s-box>
+          </s-card>
+          <s-card>
+            <s-box padding="400">
+              <s-text variant="bodySm" tone="subdued">MRR estimé</s-text>
+              <s-text variant="headingLg" fontWeight="bold">{formatCurrency(stats.estimatedMRR)}</s-text>
+            </s-box>
+          </s-card>
+        </s-box>
+      </s-section>
 
-        {/* Filters */}
-        <Card>
-          <Filters
-            queryValue=""
-            filters={[
-              {
-                key: "status",
-                label: "Statut",
-                filter: (
-                  <ChoiceList
-                    title="Statut"
-                    titleHidden
-                    choices={statusOptions}
-                    selected={[filters.status]}
-                    onChange={handleStatusChange}
-                  />
-                ),
-                shortcut: true,
-              },
-            ]}
-            onQueryChange={() => {}}
-            onQueryClear={() => {}}
-            onClearAll={() => {
-              setSearchParams(new URLSearchParams());
-            }}
-          />
-        </Card>
+      {/* Filters */}
+      <s-section>
+        <s-box display="flex" gap="200">
+          <s-button
+            variant={!filters.status ? "primary" : "secondary"}
+            onClick={() => handleFilterChange("")}
+          >
+            Tous
+          </s-button>
+          <s-button
+            variant={filters.status === "ACTIVE" ? "primary" : "secondary"}
+            onClick={() => handleFilterChange("ACTIVE")}
+          >
+            Actifs
+          </s-button>
+          <s-button
+            variant={filters.status === "PAUSED" ? "primary" : "secondary"}
+            onClick={() => handleFilterChange("PAUSED")}
+          >
+            En pause
+          </s-button>
+          <s-button
+            variant={filters.status === "CANCELLED" ? "primary" : "secondary"}
+            onClick={() => handleFilterChange("CANCELLED")}
+          >
+            Annulés
+          </s-button>
+        </s-box>
+      </s-section>
 
-        {/* Subscriptions Table */}
-        <Card>
+      {/* Subscriptions List */}
+      <s-section>
+        <s-card>
           {subscriptions.length > 0 ? (
-            <BlockStack gap="400">
-              <DataTable
-                columnContentTypes={["text", "text", "text", "text", "numeric", "text", "text"]}
-                headings={[
-                  "Client",
-                  "Produits",
-                  "Statut",
-                  "Fréquence",
-                  "Prix",
-                  "Prochaine facturation",
-                  "",
-                ]}
-                rows={rows}
-              />
-              
-              <Box padding="400">
-                <InlineStack align="center">
-                  <Pagination
-                    hasPrevious={pageInfo.hasPreviousPage}
-                    hasNext={pageInfo.hasNextPage}
-                    onNext={handleNextPage}
-                    onPrevious={() => {
-                      // Handle previous page
-                    }}
-                  />
-                </InlineStack>
-              </Box>
-            </BlockStack>
+            <s-resource-list>
+              {subscriptions.map((edge: any) => {
+                const sub = edge.node;
+                const customer = sub.customer;
+                const lines = sub.lines?.edges || [];
+                const firstLine = lines[0]?.node;
+                const totalPrice = lines.reduce((sum: number, l: any) => {
+                  return sum + parseFloat(l.node.currentPrice?.amount || 0) * (l.node.quantity || 1);
+                }, 0);
+
+                return (
+                  <s-resource-item key={sub.id} url={`/app/subscriptions/${encodeURIComponent(sub.id)}`}>
+                    <s-box display="flex" justify="space-between" align="center">
+                      <s-box>
+                        <s-text fontWeight="semibold">{customer?.email || "N/A"}</s-text>
+                        <s-text variant="bodySm" tone="subdued">
+                          {firstLine?.title || "Produit"} {lines.length > 1 && `+${lines.length - 1}`}
+                        </s-text>
+                      </s-box>
+                      <s-box display="flex" gap="400" align="center">
+                        {getStatusBadge(sub.status)}
+                        <s-text>{formatCurrency(totalPrice)}</s-text>
+                        <s-text variant="bodySm" tone="subdued">
+                          {formatDate(sub.nextBillingDate)}
+                        </s-text>
+                      </s-box>
+                    </s-box>
+                  </s-resource-item>
+                );
+              })}
+            </s-resource-list>
           ) : (
-            <EmptyState
-              heading="Aucun abonnement trouvé"
-              image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
-            >
-              <p>
-                {filters.status
-                  ? "Aucun abonnement ne correspond aux filtres sélectionnés."
-                  : "Vos abonnements apparaîtront ici une fois que les clients auront souscrit."}
-              </p>
-            </EmptyState>
+            <s-empty-state heading="Aucun abonnement">
+              <s-paragraph>
+                Les abonnements apparaîtront ici une fois que vos clients auront souscrit.
+              </s-paragraph>
+            </s-empty-state>
           )}
-        </Card>
-      </BlockStack>
-    </Page>
-  );
-}
+        </s-card>
+      </s-section>
 
-function KPICard({
-  title,
-  value,
-  tone,
-}: {
-  title: string;
-  value: string | number;
-  tone: "success" | "warning" | "critical" | "subdued" | "magic";
-}) {
-  const toneColors: Record<string, string> = {
-    success: "var(--p-color-bg-fill-success)",
-    warning: "var(--p-color-bg-fill-warning)",
-    critical: "var(--p-color-bg-fill-critical)",
-    subdued: "var(--p-color-bg-fill-secondary)",
-    magic: "var(--p-color-bg-fill-magic)",
-  };
-
-  return (
-    <Card>
-      <BlockStack gap="200">
-        <Text as="p" variant="bodySm" tone="subdued">
-          {title}
-        </Text>
-        <Text as="p" variant="headingLg" fontWeight="bold">
-          {value}
-        </Text>
-      </BlockStack>
-    </Card>
+      {/* Pagination */}
+      {pageInfo.hasNextPage && (
+        <s-section>
+          <s-box display="flex" justify="center">
+            <s-button
+              onClick={() => {
+                const params = new URLSearchParams(searchParams);
+                params.set("after", pageInfo.endCursor);
+                setSearchParams(params);
+              }}
+            >
+              Charger plus
+            </s-button>
+          </s-box>
+        </s-section>
+      )}
+    </s-page>
   );
 }
