@@ -1,0 +1,201 @@
+// Prisma schema for Luc Vincent VIP App
+// https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================================
+// SHOPIFY SESSION STORAGE
+// ============================================================================
+
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+
+  @@index([shop])
+}
+
+// ============================================================================
+// VIP MEMBERS
+// ============================================================================
+
+model vip_members {
+  id                         String    @id @default(uuid())
+  shopify_customer_id_coloration String?
+  shopify_customer_id_haircare   String?
+  email                      String    @unique
+  phone                      String?
+  first_name                 String?
+  last_name                  String?
+  tier                       String    @default("LITE") // LITE, CLUB, CLUB_PLUS
+  tier_started_at            DateTime  @default(now())
+  points_multiplier          Decimal   @default(1.5) @db.Decimal(3, 2)
+  points_balance             Int       @default(0)
+  lifetime_points            Int       @default(0)
+  birthday_month             Int?
+  birthday_day               Int?
+  quiz_completed_at          DateTime?
+  quiz_routine_result        String?
+  referral_code              String?   @unique
+  referred_by                String?
+  referral_count             Int       @default(0)
+  academy_access             String    @default("basic")
+  created_at                 DateTime  @default(now())
+  updated_at                 DateTime  @updatedAt
+
+  // Relations
+  subscriptions              vip_subscriptions[]
+  points_ledger              loyalty_points_ledger[]
+  redemptions                loyalty_redemptions[]
+
+  @@index([shopify_customer_id_coloration])
+  @@index([shopify_customer_id_haircare])
+  @@index([email])
+}
+
+// ============================================================================
+// VIP SUBSCRIPTIONS
+// ============================================================================
+
+model vip_subscriptions {
+  id                        String    @id @default(uuid())
+  member_id                 String
+  shopify_subscription_id   String?   @unique
+  brand                     String    @default("both") // coloration, haircare, both
+  status                    String    @default("active") // active, paused, cancelled, pending
+  cadence                   String    @default("4_weeks") // 4_weeks, 5_weeks, 6_weeks
+  routine_type              String?
+  next_billing_date         DateTime?
+  last_billed_at            DateTime?
+  pause_started_at          DateTime?
+  pause_until               DateTime?
+  cancelled_at              DateTime?
+  cancellation_reason       String?
+  total_orders              Int       @default(0)
+  created_at                DateTime  @default(now())
+  updated_at                DateTime  @updatedAt
+
+  // Relations
+  member                    vip_members @relation(fields: [member_id], references: [id])
+
+  @@index([member_id])
+  @@index([status])
+}
+
+// ============================================================================
+// LOYALTY POINTS LEDGER
+// ============================================================================
+
+model loyalty_points_ledger {
+  id              String    @id @default(uuid())
+  member_id       String
+  points          Int
+  action          String    // earn_purchase, earn_subscription, redeem, expire, etc.
+  description     String?
+  reference_type  String?   // order, subscription, redemption, referral
+  reference_id    String?
+  expires_at      DateTime?
+  created_at      DateTime  @default(now())
+
+  // Relations
+  member          vip_members @relation(fields: [member_id], references: [id])
+
+  @@index([member_id])
+  @@index([action])
+  @@index([expires_at])
+}
+
+// ============================================================================
+// LOYALTY REWARDS
+// ============================================================================
+
+model loyalty_rewards {
+  id              String    @id @default(uuid())
+  name            String
+  name_fr         String?
+  description     String?
+  description_fr  String?
+  type            String    // discount, shipping, product, add_on, experience, exclusive
+  points_cost     Int
+  discount_value  Decimal?  @db.Decimal(10, 2)
+  discount_type   String?   // percentage, fixed_amount
+  brand           String    @default("both")
+  tier_required   String?   // null = all tiers, CLUB, CLUB_PLUS
+  is_active       Boolean   @default(true)
+  stock_limited   Boolean   @default(false)
+  stock_count     Int?
+  sort_order      Int       @default(0)
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+
+  // Relations
+  redemptions     loyalty_redemptions[]
+
+  @@index([is_active])
+  @@index([brand])
+}
+
+// ============================================================================
+// LOYALTY REDEMPTIONS
+// ============================================================================
+
+model loyalty_redemptions {
+  id              String    @id @default(uuid())
+  member_id       String
+  reward_id       String
+  points_spent    Int
+  status          String    @default("pending") // pending, applied, expired, refunded
+  shopify_discount_code String?
+  applied_to_order_id   String?
+  expires_at      DateTime?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+
+  // Relations
+  member          vip_members     @relation(fields: [member_id], references: [id])
+  reward          loyalty_rewards @relation(fields: [reward_id], references: [id])
+
+  @@index([member_id])
+  @@index([status])
+}
+
+// ============================================================================
+// SHOP SETTINGS
+// ============================================================================
+
+model shop_settings {
+  id                    String    @id @default(uuid())
+  shop_domain           String    @unique
+  brand                 String    @default("both")
+  loyalty_enabled       Boolean   @default(true)
+  points_per_dollar     Int       @default(1)
+  welcome_bonus         Int       @default(100)
+  subscriptions_enabled Boolean   @default(true)
+  default_cadence       String    @default("4_weeks")
+  installed_at          DateTime  @default(now())
+  uninstalled_at        DateTime?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+}
