@@ -235,3 +235,4 @@ Internationalization:
 
 - [Internationalizing your app](https://shopify.dev/docs/apps/best-practices/internationalization/getting-started)
 # Trigger rebuild Wed 28 Jan 2026 21:53:09 EST
+# Build 1769655230
