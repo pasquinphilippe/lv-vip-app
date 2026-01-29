@@ -16,6 +16,11 @@ export interface TierConfig {
 export interface ShopSettings extends shop_settings {
   tierThresholds: TierThresholds;
   tierConfig: TierConfig;
+  // Points rates (with defaults applied)
+  subscription_points_per_dollar: number;
+  regular_points_per_dollar: number;
+  subscription_milestone_months: number;
+  subscription_milestone_bonus: number;
 }
 
 // Default tier thresholds
@@ -71,6 +76,11 @@ export async function getShopSettings(
     ...rawSettings,
     tierThresholds: (rawSettings.tier_thresholds as unknown as TierThresholds) || DEFAULT_TIER_THRESHOLDS,
     tierConfig: (rawSettings.tier_config as unknown as TierConfig) || DEFAULT_TIER_CONFIG,
+    // Points rates with defaults
+    subscription_points_per_dollar: (rawSettings as Record<string, unknown>).subscription_points_per_dollar as number ?? 200,
+    regular_points_per_dollar: (rawSettings as Record<string, unknown>).regular_points_per_dollar as number ?? 100,
+    subscription_milestone_months: (rawSettings as Record<string, unknown>).subscription_milestone_months as number ?? 3,
+    subscription_milestone_bonus: (rawSettings as Record<string, unknown>).subscription_milestone_bonus as number ?? 500,
   };
 
   // Cache the settings
