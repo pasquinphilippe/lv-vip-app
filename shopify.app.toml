@@ -2,9 +2,14 @@
 
 client_id = "551a199221a7521e32de9e48586bcef0"
 name = "LV-VIP-APP"
-application_url = "https://localhost:3000"
+application_url = "https://vip.lucvincent.com"
 embedded = true
 handle = "lv-vip-app"
+
+[app_proxy]
+url = "https://vip.lucvincent.com"
+subpath = "apps/vip"
+prefix = "apps"
 
 [build]
 automatically_update_urls_on_dev = true
@@ -41,7 +46,7 @@ api_version = "2025-04"
 scopes = "read_customer_payment_methods,read_customers,read_discounts,read_orders,read_own_subscription_contracts,read_price_rules,read_products,write_customers,write_discounts,write_orders,write_own_subscription_contracts,write_price_rules"
 
 [auth]
-redirect_urls = [ "https://localhost:3000/auth/callback" ]
+redirect_urls = [ "https://vip.lucvincent.com/auth/callback" ]
 
 [pos]
 embedded = false
