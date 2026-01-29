@@ -124,6 +124,51 @@
 </s-table>
 ```
 
+## App Bridge APIs
+
+### Toast Notifications
+```jsx
+// Success toast
+shopify.toast.show("Success message", { duration: 3000 });
+
+// Error toast
+shopify.toast.show("Error message", { isError: true });
+
+// With action
+shopify.toast.show("Item saved", {
+  duration: 5000,
+  action: {
+    content: "Undo",
+    onAction: () => handleUndo(),
+  },
+});
+```
+
+### Usage in React (with fetcher)
+```jsx
+import React from "react";
+
+// In component:
+React.useEffect(() => {
+  if (fetcher.state === "idle" && fetcher.data) {
+    if (fetcher.data.success) {
+      shopify.toast.show("Action réussie", { duration: 3000 });
+    } else if (fetcher.data.error) {
+      shopify.toast.show(fetcher.data.error, { isError: true });
+    }
+  }
+}, [fetcher.state, fetcher.data]);
+```
+
+### Usage with useNavigation (form action)
+```jsx
+React.useEffect(() => {
+  if (navigation.state === "idle" && actionData?.success) {
+    shopify.toast.show("Saved", { duration: 3000 });
+  }
+}, [navigation.state, actionData]);
+```
+
 ## Gap/Padding Scale
 - `none`, `small-100`, `small-200`, `small-300`, `small-400`
 - `base`, `large`, `large-100`, `large-200`, etc.
