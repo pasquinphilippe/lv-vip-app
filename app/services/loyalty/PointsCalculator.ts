@@ -1,45 +1,42 @@
-import type { vip_members } from "@prisma/client";
 import type { ShopSettings } from "./SettingsService";
-import { getTierMultiplier } from "./SettingsService";
 
 export interface PurchasePointsInput {
   totalPrice: number;
-  member: vip_members;
+  isSubscriptionOrder: boolean;
   settings: ShopSettings;
 }
 
-export interface SubscriptionPointsInput {
-  isNewSubscription: boolean;
-  isReactivation?: boolean;
+export interface SubscriptionMilestoneInput {
+  subscriptionStartDate: Date;
   settings: ShopSettings;
 }
 
 /**
  * Calculate points earned from a purchase
+ * Simple hardcoded rates:
+ * - Subscription orders: 200 points per dollar
+ * - Regular orders: 100 points per dollar
  */
 export function calculatePurchasePoints({
   totalPrice,
-  member,
+  isSubscriptionOrder,
   settings,
 }: PurchasePointsInput): number {
   if (!settings.loyalty_enabled) {
     return 0;
   }
 
-  // Base points = price * points per dollar
-  const basePoints = Math.floor(totalPrice * settings.points_per_dollar);
+  const pointsPerDollar = isSubscriptionOrder
+    ? settings.subscription_points_per_dollar
+    : settings.regular_points_per_dollar;
 
-  // Apply tier multiplier
-  const multiplier = getTierMultiplier(settings, member.tier);
-  const earnedPoints = Math.floor(basePoints * multiplier);
-
-  return earnedPoints;
+  return Math.floor(totalPrice * pointsPerDollar);
 }
 
 /**
- * Calculate points earned from a new member purchase (before member exists)
+ * Calculate points for a regular (non-subscription) purchase
  */
-export function calculateNewMemberPurchasePoints(
+export function calculateRegularPurchasePoints(
   totalPrice: number,
   settings: ShopSettings
 ): number {
@@ -47,31 +44,59 @@ export function calculateNewMemberPurchasePoints(
     return 0;
   }
 
-  const basePoints = Math.floor(totalPrice * settings.points_per_dollar);
-  const liteMultiplier = getTierMultiplier(settings, "LITE");
-
-  return Math.floor(basePoints * liteMultiplier);
+  return Math.floor(totalPrice * settings.regular_points_per_dollar);
 }
 
 /**
- * Calculate subscription-related points
+ * Calculate points for a subscription purchase
  */
-export function calculateSubscriptionPoints({
-  isNewSubscription,
-  isReactivation = false,
-  settings,
-}: SubscriptionPointsInput): number {
+export function calculateSubscriptionPurchasePoints(
+  totalPrice: number,
+  settings: ShopSettings
+): number {
   if (!settings.loyalty_enabled) {
     return 0;
   }
 
-  if (isReactivation) {
-    return settings.reactivation_bonus;
+  return Math.floor(totalPrice * settings.subscription_points_per_dollar);
+}
+
+/**
+ * Check if subscriber has reached a milestone anniversary
+ * Returns bonus points if they have, 0 otherwise
+ */
+export function calculateSubscriptionMilestoneBonus({
+  subscriptionStartDate,
+  settings,
+}: SubscriptionMilestoneInput): { 
+  eligible: boolean; 
+  monthsActive: number; 
+  bonusPoints: number;
+} {
+  if (!settings.loyalty_enabled) {
+    return { eligible: false, monthsActive: 0, bonusPoints: 0 };
   }
 
-  return isNewSubscription
-    ? settings.subscription_new_points
-    : settings.subscription_renewal_points;
+  const now = new Date();
+  const startDate = new Date(subscriptionStartDate);
+  
+  // Calculate months active
+  const monthsDiff = 
+    (now.getFullYear() - startDate.getFullYear()) * 12 + 
+    (now.getMonth() - startDate.getMonth());
+
+  const milestoneMonths = settings.subscription_milestone_months;
+  
+  // Check if this is a milestone month (every N months)
+  if (monthsDiff > 0 && monthsDiff % milestoneMonths === 0) {
+    return {
+      eligible: true,
+      monthsActive: monthsDiff,
+      bonusPoints: settings.subscription_milestone_bonus,
+    };
+  }
+
+  return { eligible: false, monthsActive: monthsDiff, bonusPoints: 0 };
 }
 
 /**
@@ -83,15 +108,4 @@ export function getWelcomeBonus(settings: ShopSettings): number {
   }
 
   return settings.welcome_bonus;
-}
-
-/**
- * Get milestone bonus points for tier upgrade
- */
-export function getMilestoneBonus(settings: ShopSettings): number {
-  if (!settings.loyalty_enabled) {
-    return 0;
-  }
-
-  return settings.milestone_tier_bonus;
 }

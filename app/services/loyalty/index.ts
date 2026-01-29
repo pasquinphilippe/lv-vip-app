@@ -13,12 +13,12 @@ export {
 // Points Calculator
 export {
   calculatePurchasePoints,
-  calculateNewMemberPurchasePoints,
-  calculateSubscriptionPoints,
+  calculateRegularPurchasePoints,
+  calculateSubscriptionPurchasePoints,
+  calculateSubscriptionMilestoneBonus,
   getWelcomeBonus,
-  getMilestoneBonus,
   type PurchasePointsInput,
-  type SubscriptionPointsInput,
+  type SubscriptionMilestoneInput,
 } from "./PointsCalculator";
 
 // Tier Manager
