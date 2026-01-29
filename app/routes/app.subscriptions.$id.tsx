@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useNavigation, redirect } from "react-router";
+import { useLoaderData, useSubmit, useNavigation } from "react-router";
 import { useState } from "react";
 import { authenticate } from "../shopify.server";
 
@@ -200,22 +200,23 @@ export default function SubscriptionDetailPage() {
 
   const interval = subscription.billingPolicy?.interval || "MONTH";
   const intervalCount = subscription.billingPolicy?.intervalCount || 1;
-  const intervalLabel = {
+  const intervalLabels: Record<string, string> = {
     WEEK: `${intervalCount} semaine(s)`,
     MONTH: `${intervalCount} mois`,
     YEAR: `${intervalCount} an(s)`,
-  }[interval] || interval;
+  };
+  const intervalLabel = intervalLabels[interval] || interval;
 
   const totalPrice = lines.reduce((sum: number, e: any) => {
     return sum + parseFloat(e.node.currentPrice?.amount || 0) * (e.node.quantity || 1);
   }, 0);
 
-  const statusTones: Record<string, string> = {
+  const statusTones = {
     ACTIVE: "success",
     PAUSED: "warning",
     CANCELLED: "critical",
     FAILED: "critical",
-  };
+  } as const;
 
   const statusLabels: Record<string, string> = {
     ACTIVE: "Actif",
@@ -224,21 +225,26 @@ export default function SubscriptionDetailPage() {
     FAILED: "Échoué",
   };
 
+  const getTone = (status: string) => {
+    return statusTones[status as keyof typeof statusTones] || "info";
+  };
+
   return (
-    <s-page
-      heading={`Abonnement - ${customer?.email || "Client"}`}
-      backAction={{ url: "/app/subscriptions" }}
-    >
+    <s-page heading={`Abonnement - ${customer?.email || "Client"}`}>
+      <s-button slot="breadcrumb-actions" href="/app/subscriptions" variant="tertiary">
+        ← Retour
+      </s-button>
+
       {/* Status Badge */}
-      <s-section>
-        <s-badge tone={statusTones[subscription.status] || "info"}>
+      <s-section heading="Statut">
+        <s-badge tone={getTone(subscription.status)}>
           {statusLabels[subscription.status] || subscription.status}
         </s-badge>
       </s-section>
 
       {/* Actions */}
-      <s-section>
-        <s-box display="flex" gap="200">
+      <s-section heading="Actions">
+        <s-stack direction="inline" gap="base">
           {subscription.status === "ACTIVE" && (
             <s-button onClick={() => handleAction("pause")} disabled={isSubmitting}>
               Mettre en pause
@@ -254,150 +260,167 @@ export default function SubscriptionDetailPage() {
               Annuler
             </s-button>
           )}
-        </s-box>
+        </s-stack>
       </s-section>
 
       {/* Subscription Details */}
       <s-section heading="Détails">
-        <s-card>
-          <s-description-list>
-            <s-description-list-item term="Fréquence">
-              Chaque {intervalLabel}
-            </s-description-list-item>
-            <s-description-list-item term="Prochaine facturation">
-              {formatDate(subscription.nextBillingDate)}
-            </s-description-list-item>
-            <s-description-list-item term="Créé le">
-              {formatDate(subscription.createdAt)}
-            </s-description-list-item>
-            <s-description-list-item term="Dernier paiement">
-              {subscription.lastPaymentStatus || "N/A"}
-            </s-description-list-item>
-          </s-description-list>
-        </s-card>
+        <s-stack direction="block" gap="base">
+          <s-box padding="base" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text type="strong">Fréquence</s-text>
+              <s-text>Chaque {intervalLabel}</s-text>
+            </s-stack>
+          </s-box>
+          <s-box padding="base" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text type="strong">Prochaine facturation</s-text>
+              <s-text>{formatDate(subscription.nextBillingDate)}</s-text>
+            </s-stack>
+          </s-box>
+          <s-box padding="base" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text type="strong">Créé le</s-text>
+              <s-text>{formatDate(subscription.createdAt)}</s-text>
+            </s-stack>
+          </s-box>
+          <s-box padding="base" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text type="strong">Dernier paiement</s-text>
+              <s-text>{subscription.lastPaymentStatus || "N/A"}</s-text>
+            </s-stack>
+          </s-box>
+        </s-stack>
       </s-section>
 
       {/* Products */}
       <s-section heading={`Produits (${lines.length})`}>
-        <s-card>
+        <s-stack direction="block" gap="base">
           {lines.map((edge: any) => {
             const line = edge.node;
             return (
-              <s-box key={line.id} padding="300" display="flex" justify="space-between">
-                <s-box>
-                  <s-text fontWeight="semibold">{line.title}</s-text>
-                  {line.variantTitle && (
-                    <s-text variant="bodySm" tone="subdued">{line.variantTitle}</s-text>
-                  )}
-                </s-box>
-                <s-text>
-                  {line.quantity} × {formatCurrency(line.currentPrice?.amount, subscription.currencyCode)}
-                </s-text>
+              <s-box key={line.id} padding="base" borderWidth="base" borderRadius="base">
+                <s-stack direction="inline" gap="large">
+                  <s-stack direction="block" gap="small">
+                    <s-text type="strong">{line.title}</s-text>
+                    {line.variantTitle && (
+                      <s-text color="subdued">{line.variantTitle}</s-text>
+                    )}
+                  </s-stack>
+                  <s-text>
+                    {line.quantity} × {formatCurrency(line.currentPrice?.amount, subscription.currencyCode)}
+                  </s-text>
+                </s-stack>
               </s-box>
             );
           })}
           <s-divider />
-          <s-box padding="300" display="flex" justify="space-between">
-            <s-text fontWeight="bold">Total par livraison</s-text>
-            <s-text fontWeight="bold">{formatCurrency(totalPrice, subscription.currencyCode)}</s-text>
+          <s-box padding="base" background="subdued" borderRadius="base">
+            <s-stack direction="inline" gap="large">
+              <s-text type="strong">Total par livraison</s-text>
+              <s-text type="strong">{formatCurrency(totalPrice, subscription.currencyCode)}</s-text>
+            </s-stack>
           </s-box>
-        </s-card>
+        </s-stack>
       </s-section>
 
       {/* Customer */}
       <s-section heading="Client">
-        <s-card>
-          <s-description-list>
-            <s-description-list-item term="Nom">
-              {customer?.firstName} {customer?.lastName}
-            </s-description-list-item>
-            <s-description-list-item term="Email">
-              {customer?.email}
-            </s-description-list-item>
-            <s-description-list-item term="Téléphone">
-              {customer?.phone || "N/A"}
-            </s-description-list-item>
-          </s-description-list>
-        </s-card>
+        <s-stack direction="block" gap="base">
+          <s-box padding="base" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text type="strong">Nom</s-text>
+              <s-text>{customer?.firstName} {customer?.lastName}</s-text>
+            </s-stack>
+          </s-box>
+          <s-box padding="base" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text type="strong">Email</s-text>
+              <s-text>{customer?.email}</s-text>
+            </s-stack>
+          </s-box>
+          <s-box padding="base" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text type="strong">Téléphone</s-text>
+              <s-text>{customer?.phone || "N/A"}</s-text>
+            </s-stack>
+          </s-box>
+        </s-stack>
       </s-section>
 
       {/* Delivery Address */}
       {address && (
         <s-section heading="Adresse de livraison">
-          <s-card>
-            <s-box padding="300">
+          <s-box padding="base" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
               <s-text>{address.firstName} {address.lastName}</s-text>
               <s-text>{address.address1}</s-text>
               {address.address2 && <s-text>{address.address2}</s-text>}
               <s-text>{address.city}, {address.province} {address.zip}</s-text>
               <s-text>{address.country}</s-text>
-            </s-box>
-          </s-card>
+            </s-stack>
+          </s-box>
         </s-section>
       )}
 
       {/* Payment Method */}
       {paymentMethod && (
         <s-section heading="Mode de paiement">
-          <s-card>
-            <s-box padding="300">
+          <s-box padding="base" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
               <s-text>{paymentMethod.brand} •••• {paymentMethod.lastDigits}</s-text>
-              <s-text variant="bodySm" tone="subdued">
+              <s-text color="subdued">
                 Exp. {paymentMethod.expiryMonth}/{paymentMethod.expiryYear}
               </s-text>
-            </s-box>
-          </s-card>
+            </s-stack>
+          </s-box>
         </s-section>
       )}
 
       {/* Order History */}
       {orders.length > 0 && (
         <s-section heading="Historique des commandes">
-          <s-card>
+          <s-stack direction="block" gap="base">
             {orders.map((edge: any) => {
               const order = edge.node;
               return (
-                <s-box key={order.id} padding="300" display="flex" justify="space-between">
-                  <s-text>{order.name}</s-text>
-                  <s-box display="flex" gap="400">
+                <s-box key={order.id} padding="base" borderWidth="base" borderRadius="base">
+                  <s-stack direction="inline" gap="large">
+                    <s-text type="strong">{order.name}</s-text>
                     <s-text>{formatDate(order.createdAt)}</s-text>
                     <s-text>{formatCurrency(order.totalPriceSet?.shopMoney?.amount)}</s-text>
-                  </s-box>
+                  </s-stack>
                 </s-box>
               );
             })}
-          </s-card>
+          </s-stack>
         </s-section>
       )}
 
-      {/* Cancel Confirmation Modal */}
+      {/* Cancel Confirmation - using banner instead of modal */}
       {showCancel && (
-        <s-modal
-          open
-          heading="Annuler l'abonnement"
-          onClose={() => setShowCancel(false)}
-          primaryAction={{
-            content: "Confirmer l'annulation",
-            destructive: true,
-            onAction: () => {
-              handleAction("cancel");
-              setShowCancel(false);
-            },
-          }}
-          secondaryAction={{
-            content: "Annuler",
-            onAction: () => setShowCancel(false),
-          }}
-        >
-          <s-box padding="400">
-            <s-banner tone="warning">
-              Cette action est irréversible.
-            </s-banner>
-            <s-text>
+        <s-section>
+          <s-banner tone="warning" heading="Confirmer l'annulation">
+            <s-paragraph>
               Êtes-vous sûr de vouloir annuler cet abonnement pour {customer?.email}?
-            </s-text>
-          </s-box>
-        </s-modal>
+              Cette action est irréversible.
+            </s-paragraph>
+            <s-stack direction="inline" gap="base">
+              <s-button
+                tone="critical"
+                onClick={() => {
+                  handleAction("cancel");
+                  setShowCancel(false);
+                }}
+              >
+                Confirmer l'annulation
+              </s-button>
+              <s-button variant="secondary" onClick={() => setShowCancel(false)}>
+                Annuler
+              </s-button>
+            </s-stack>
+          </s-banner>
+        </s-section>
       )}
     </s-page>
   );

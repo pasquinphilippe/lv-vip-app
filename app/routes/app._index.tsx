@@ -1,249 +1,379 @@
-import { useEffect } from "react";
-import type {
-  ActionFunctionArgs,
-  HeadersFunction,
-  LoaderFunctionArgs,
-} from "react-router";
-import { useFetcher } from "react-router";
-import { useAppBridge } from "@shopify/app-bridge-react";
+import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
+import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
 
-  return null;
-};
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfWeek = new Date(startOfToday);
+  startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
-  const color = ["Red", "Orange", "Yellow", "Green"][
-    Math.floor(Math.random() * 4)
-  ];
-  const response = await admin.graphql(
-    `#graphql
-      mutation populateProduct($product: ProductCreateInput!) {
-        productCreate(product: $product) {
-          product {
-            id
-            title
-            handle
-            status
-            variants(first: 10) {
-              edges {
-                node {
-                  id
-                  price
-                  barcode
-                  createdAt
-                }
-              }
-            }
-          }
-        }
-      }`,
-    {
-      variables: {
-        product: {
-          title: `${color} Snowboard`,
+  const [
+    totalMembers,
+    tierCounts,
+    activeSubscriptions,
+    pointsToday,
+    pointsWeek,
+    pointsMonth,
+    recentActivity,
+    recentRedemptions,
+    totalPointsInCirculation,
+  ] = await Promise.all([
+    // Total VIP members
+    prisma.vip_members.count(),
+
+    // Tier breakdown
+    prisma.vip_members.groupBy({
+      by: ["tier"],
+      _count: { id: true },
+    }),
+
+    // Active subscriptions
+    prisma.vip_subscriptions.count({
+      where: { status: "active" },
+    }),
+
+    // Points awarded today
+    prisma.loyalty_points_ledger.aggregate({
+      _sum: { points: true },
+      where: {
+        action: { startsWith: "earn" },
+        created_at: { gte: startOfToday },
+      },
+    }),
+
+    // Points awarded this week
+    prisma.loyalty_points_ledger.aggregate({
+      _sum: { points: true },
+      where: {
+        action: { startsWith: "earn" },
+        created_at: { gte: startOfWeek },
+      },
+    }),
+
+    // Points awarded this month
+    prisma.loyalty_points_ledger.aggregate({
+      _sum: { points: true },
+      where: {
+        action: { startsWith: "earn" },
+        created_at: { gte: startOfMonth },
+      },
+    }),
+
+    // Recent activity (last 20 events)
+    prisma.loyalty_points_ledger.findMany({
+      orderBy: { created_at: "desc" },
+      take: 20,
+      include: {
+        member: {
+          select: { email: true, first_name: true, last_name: true, tier: true },
         },
       },
-    },
-  );
-  const responseJson = await response.json();
+    }),
 
-  const product = responseJson.data!.productCreate!.product!;
-  const variantId = product.variants.edges[0]!.node!.id!;
-
-  const variantResponse = await admin.graphql(
-    `#graphql
-    mutation shopifyReactRouterTemplateUpdateVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-        productVariants {
-          id
-          price
-          barcode
-          createdAt
-        }
-      }
-    }`,
-    {
-      variables: {
-        productId: product.id,
-        variants: [{ id: variantId, price: "100.00" }],
+    // Recent redemptions count (30 days)
+    prisma.loyalty_redemptions.count({
+      where: {
+        created_at: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
       },
+    }),
+
+    // Total points in circulation
+    prisma.vip_members.aggregate({
+      _sum: { points_balance: true },
+    }),
+  ]);
+
+  // Build tier map
+  const tiers = tierCounts.reduce(
+    (acc, { tier, _count }) => {
+      acc[tier] = _count.id;
+      return acc;
     },
+    {} as Record<string, number>,
   );
 
-  const variantResponseJson = await variantResponse.json();
+  // Estimate MRR from active subscriptions (rough: avg $49/cycle * 4 weeks)
+  // For simplicity, get subscription data
+  const subscriptionBreakdown = await prisma.vip_subscriptions.groupBy({
+    by: ["cadence"],
+    where: { status: "active" },
+    _count: { id: true },
+  });
+
+  // Estimate MRR based on cadence (Coloration Pro = simpler, $49 avg)
+  let estimatedMRR = 0;
+  for (const sub of subscriptionBreakdown) {
+    const count = sub._count.id;
+    const avgPrice = 49; // Coloration Pro avg
+    const weeksPerCycle =
+      sub.cadence === "4_weeks" ? 4 : sub.cadence === "5_weeks" ? 5 : 6;
+    const monthlyMultiplier = 4.33 / weeksPerCycle;
+    estimatedMRR += count * avgPrice * monthlyMultiplier;
+  }
 
   return {
-    product: responseJson!.data!.productCreate!.product,
-    variant:
-      variantResponseJson!.data!.productVariantsBulkUpdate!.productVariants,
+    totalMembers,
+    tiers,
+    activeSubscriptions,
+    pointsToday: pointsToday._sum.points || 0,
+    pointsWeek: pointsWeek._sum.points || 0,
+    pointsMonth: pointsMonth._sum.points || 0,
+    recentActivity: recentActivity.map((a) => ({
+      id: a.id,
+      action: a.action,
+      points: a.points,
+      description: a.description,
+      createdAt: a.created_at.toISOString(),
+      memberEmail: a.member.email,
+      memberName: [a.member.first_name, a.member.last_name]
+        .filter(Boolean)
+        .join(" "),
+      memberTier: a.member.tier,
+    })),
+    recentRedemptions,
+    totalPointsInCirculation: totalPointsInCirculation._sum.points_balance || 0,
+    estimatedMRR,
   };
 };
 
 export default function Index() {
-  const fetcher = useFetcher<typeof action>();
+  const data = useLoaderData<typeof loader>();
 
-  const shopify = useAppBridge();
-  const isLoading =
-    ["loading", "submitting"].includes(fetcher.state) &&
-    fetcher.formMethod === "POST";
+  const tierLabels: Record<string, string> = {
+    LITE: "Lite",
+    CLUB: "Club",
+    CLUB_PLUS: "Club+",
+  };
 
-  useEffect(() => {
-    if (fetcher.data?.product?.id) {
-      shopify.toast.show("Product created");
-    }
-  }, [fetcher.data?.product?.id, shopify]);
+  const tierColors: Record<string, "info" | "success" | "warning"> = {
+    LITE: "info",
+    CLUB: "success",
+    CLUB_PLUS: "warning",
+  };
 
-  const generateProduct = () => fetcher.submit({}, { method: "POST" });
+  const actionLabels: Record<string, string> = {
+    earn_purchase: "🛒 Achat",
+    earn_subscription: "🔄 Abonnement",
+    earn_milestone: "🏆 Passage de niveau",
+    earn_referral: "🤝 Parrainage",
+    earn_birthday: "🎂 Anniversaire",
+    earn_welcome: "👋 Bienvenue",
+    redeem: "🎁 Échange",
+    expire: "⏰ Expiration",
+  };
+
+  const formatCurrency = (amount: number) =>
+    new Intl.NumberFormat("fr-CA", {
+      style: "currency",
+      currency: "CAD",
+    }).format(amount);
+
+  const formatDate = (dateStr: string) => {
+    const d = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    const diffH = Math.floor(diffMs / 3600000);
+
+    if (diffMin < 1) return "À l'instant";
+    if (diffMin < 60) return `Il y a ${diffMin} min`;
+    if (diffH < 24) return `Il y a ${diffH}h`;
+    return d.toLocaleDateString("fr-CA", {
+      day: "numeric",
+      month: "short",
+    });
+  };
 
   return (
-    <s-page heading="Shopify app template">
-      <s-button slot="primary-action" onClick={generateProduct}>
-        Generate a product
+    <s-page heading="Tableau de bord VIP">
+      {/* Quick Actions */}
+      <s-button slot="primary-action" href="/app/rewards">
+        Gérer les récompenses
       </s-button>
 
-      <s-section heading="Congrats on creating a new Shopify app 🎉">
-        <s-paragraph>
-          This embedded app template uses{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/tools/app-bridge"
-            target="_blank"
-          >
-            App Bridge
-          </s-link>{" "}
-          interface examples like an{" "}
-          <s-link href="/app/additional">additional page in the app nav</s-link>
-          , as well as an{" "}
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql"
-            target="_blank"
-          >
-            Admin GraphQL
-          </s-link>{" "}
-          mutation demo, to provide a starting point for app development.
-        </s-paragraph>
-      </s-section>
-      <s-section heading="Get started with products">
-        <s-paragraph>
-          Generate a product with GraphQL and get the JSON output for that
-          product. Learn more about the{" "}
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql/latest/mutations/productCreate"
-            target="_blank"
-          >
-            productCreate
-          </s-link>{" "}
-          mutation in our API references.
-        </s-paragraph>
-        <s-stack direction="inline" gap="base">
-          <s-button
-            onClick={generateProduct}
-            {...(isLoading ? { loading: true } : {})}
-          >
-            Generate a product
-          </s-button>
-          {fetcher.data?.product && (
-            <s-button
-              onClick={() => {
-                shopify.intents.invoke?.("edit:shopify/Product", {
-                  value: fetcher.data?.product?.id,
-                });
-              }}
-              target="_blank"
-              variant="tertiary"
-            >
-              Edit product
-            </s-button>
-          )}
-        </s-stack>
-        {fetcher.data?.product && (
-          <s-section heading="productCreate mutation">
-            <s-stack direction="block" gap="base">
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre style={{ margin: 0 }}>
-                  <code>{JSON.stringify(fetcher.data.product, null, 2)}</code>
-                </pre>
-              </s-box>
-
-              <s-heading>productVariantsBulkUpdate mutation</s-heading>
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre style={{ margin: 0 }}>
-                  <code>{JSON.stringify(fetcher.data.variant, null, 2)}</code>
-                </pre>
-              </s-box>
+      {/* KPI Cards Row 1 */}
+      <s-section heading="Vue d'ensemble">
+        <s-stack direction="inline" gap="large">
+          <s-box padding="large" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text color="subdued">Membres VIP</s-text>
+              <s-text type="strong">{data.totalMembers}</s-text>
             </s-stack>
-          </s-section>
+          </s-box>
+          <s-box padding="large" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text color="subdued">Abonnements actifs</s-text>
+              <s-text type="strong">{data.activeSubscriptions}</s-text>
+            </s-stack>
+          </s-box>
+          <s-box padding="large" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text color="subdued">MRR estimé</s-text>
+              <s-text type="strong">
+                {formatCurrency(data.estimatedMRR)}
+              </s-text>
+            </s-stack>
+          </s-box>
+          <s-box padding="large" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text color="subdued">Points en circulation</s-text>
+              <s-text type="strong">
+                {data.totalPointsInCirculation.toLocaleString("fr-CA")}
+              </s-text>
+            </s-stack>
+          </s-box>
+        </s-stack>
+      </s-section>
+
+      {/* Tier Breakdown */}
+      <s-section heading="Répartition par niveau">
+        <s-stack direction="inline" gap="large">
+          {(["LITE", "CLUB", "CLUB_PLUS"] as const).map((tier) => (
+            <s-box
+              key={tier}
+              padding="large"
+              borderWidth="base"
+              borderRadius="base"
+            >
+              <s-stack direction="block" gap="small">
+                <s-badge tone={tierColors[tier]}>{tierLabels[tier]}</s-badge>
+                <s-text type="strong">{data.tiers[tier] || 0}</s-text>
+                <s-text color="subdued">
+                  {data.totalMembers > 0
+                    ? `${Math.round(((data.tiers[tier] || 0) / data.totalMembers) * 100)}%`
+                    : "0%"}
+                </s-text>
+              </s-stack>
+            </s-box>
+          ))}
+        </s-stack>
+      </s-section>
+
+      {/* Points Activity */}
+      <s-section heading="Points attribués">
+        <s-stack direction="inline" gap="large">
+          <s-box padding="large" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text color="subdued">Aujourd'hui</s-text>
+              <s-text type="strong">
+                {data.pointsToday.toLocaleString("fr-CA")}
+              </s-text>
+            </s-stack>
+          </s-box>
+          <s-box padding="large" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text color="subdued">Cette semaine</s-text>
+              <s-text type="strong">
+                {data.pointsWeek.toLocaleString("fr-CA")}
+              </s-text>
+            </s-stack>
+          </s-box>
+          <s-box padding="large" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text color="subdued">Ce mois</s-text>
+              <s-text type="strong">
+                {data.pointsMonth.toLocaleString("fr-CA")}
+              </s-text>
+            </s-stack>
+          </s-box>
+          <s-box padding="large" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text color="subdued">Échanges (30j)</s-text>
+              <s-text type="strong">{data.recentRedemptions}</s-text>
+            </s-stack>
+          </s-box>
+        </s-stack>
+      </s-section>
+
+      {/* Recent Activity Feed */}
+      <s-section heading="Activité récente">
+        {data.recentActivity.length > 0 ? (
+          <s-stack direction="block" gap="small">
+            {data.recentActivity.map((activity) => (
+              <s-box
+                key={activity.id}
+                padding="base"
+                borderWidth="base"
+                borderRadius="base"
+                background="subdued"
+              >
+                <s-stack direction="inline" gap="large">
+                  <s-stack direction="block" gap="small">
+                    <s-stack direction="inline" gap="base">
+                      <s-text type="strong">
+                        {activity.memberName || activity.memberEmail}
+                      </s-text>
+                      <s-badge
+                        tone={tierColors[activity.memberTier] || "info"}
+                      >
+                        {tierLabels[activity.memberTier] || activity.memberTier}
+                      </s-badge>
+                    </s-stack>
+                    <s-text color="subdued">
+                      {actionLabels[activity.action] || activity.action}
+                      {activity.description ? ` — ${activity.description}` : ""}
+                    </s-text>
+                  </s-stack>
+                  <s-stack direction="inline" gap="base">
+                    <s-badge
+                      tone={activity.points > 0 ? "success" : "critical"}
+                    >
+                      {activity.points > 0 ? "+" : ""}
+                      {activity.points} pts
+                    </s-badge>
+                    <s-text color="subdued">
+                      {formatDate(activity.createdAt)}
+                    </s-text>
+                  </s-stack>
+                </s-stack>
+              </s-box>
+            ))}
+          </s-stack>
+        ) : (
+          <s-box padding="large">
+            <s-stack direction="block" gap="base">
+              <s-text type="strong">Aucune activité</s-text>
+              <s-paragraph>
+                L'activité VIP apparaîtra ici dès que vos clients commenceront
+                à gagner et échanger des points.
+              </s-paragraph>
+            </s-stack>
+          </s-box>
         )}
       </s-section>
 
-      <s-section slot="aside" heading="App template specs">
-        <s-paragraph>
-          <s-text>Framework: </s-text>
-          <s-link href="https://reactrouter.com/" target="_blank">
-            React Router
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Interface: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/api/app-home/using-polaris-components"
-            target="_blank"
-          >
-            Polaris web components
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>API: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql"
-            target="_blank"
-          >
-            GraphQL
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Database: </s-text>
-          <s-link href="https://www.prisma.io/" target="_blank">
-            Prisma
-          </s-link>
-        </s-paragraph>
+      {/* Quick Links - Aside */}
+      <s-section slot="aside" heading="Accès rapide">
+        <s-stack direction="block" gap="base">
+          <s-button href="/app/rewards" variant="secondary">
+            🎁 Récompenses
+          </s-button>
+          <s-button href="/app/loyalty" variant="secondary">
+            ⭐ Programme VIP
+          </s-button>
+          <s-button href="/app/subscriptions" variant="secondary">
+            🔄 Abonnements
+          </s-button>
+          <s-button href="/app/customers" variant="secondary">
+            👥 Clients
+          </s-button>
+          <s-button href="/app/settings" variant="secondary">
+            ⚙️ Paramètres
+          </s-button>
+        </s-stack>
       </s-section>
 
-      <s-section slot="aside" heading="Next steps">
-        <s-unordered-list>
-          <s-list-item>
-            Build an{" "}
-            <s-link
-              href="https://shopify.dev/docs/apps/getting-started/build-app-example"
-              target="_blank"
-            >
-              example app
-            </s-link>
-          </s-list-item>
-          <s-list-item>
-            Explore Shopify&apos;s API with{" "}
-            <s-link
-              href="https://shopify.dev/docs/apps/tools/graphiql-admin-api"
-              target="_blank"
-            >
-              GraphiQL
-            </s-link>
-          </s-list-item>
-        </s-unordered-list>
+      <s-section slot="aside" heading="Coloration Pro">
+        <s-paragraph>
+          Programme de fidélité pour lucvincentcoloration.com — points sur
+          achats, abonnements et add-ons.
+        </s-paragraph>
       </s-section>
     </s-page>
   );

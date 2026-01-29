@@ -69,6 +69,9 @@ model vip_members {
   subscriptions              vip_subscriptions[]
   points_ledger              loyalty_points_ledger[]
   redemptions                loyalty_redemptions[]
+  referrals_made             referral_events[]  @relation("referrer")
+  referrals_received         referral_events[]  @relation("referee")
+  birthday_claims            birthday_claims[]
 
   @@index([shopify_customer_id_coloration])
   @@index([shopify_customer_id_haircare])
@@ -198,4 +201,65 @@ model shop_settings {
   uninstalled_at        DateTime?
   created_at            DateTime  @default(now())
   updated_at            DateTime  @updatedAt
+
+  // Tier Configuration
+  tier_thresholds         Json?     // { CLUB: 1000, CLUB_PLUS: 5000 }
+  tier_config             Json?     // { LITE: { multiplier: 1.5, academy: "basic" }, ... }
+  milestone_tier_bonus    Int       @default(100)
+
+  // Points Earning
+  subscription_new_points     Int   @default(50)
+  subscription_renewal_points Int   @default(25)
+  reactivation_bonus          Int   @default(50)
+
+  // Referral Program
+  referral_enabled        Boolean   @default(false)
+  referrer_reward_points  Int       @default(100)
+  referee_reward_points   Int       @default(50)
+  referral_min_purchase   Decimal?  @db.Decimal(10, 2)
+
+  // Birthday Rewards
+  birthday_enabled        Boolean   @default(false)
+  birthday_points         Int       @default(100)
+  birthday_window_days    Int       @default(7)
+}
+
+// ============================================================================
+// REFERRAL EVENTS
+// ============================================================================
+
+model referral_events {
+  id                      String    @id @default(uuid())
+  referrer_id             String
+  referee_id              String
+  qualifying_order_id     String?
+  referrer_points_awarded Int?
+  referee_points_awarded  Int?
+  status                  String    @default("pending") // pending, completed, expired
+  created_at              DateTime  @default(now())
+  completed_at            DateTime?
+
+  referrer  vip_members @relation("referrer", fields: [referrer_id], references: [id])
+  referee   vip_members @relation("referee", fields: [referee_id], references: [id])
+
+  @@index([referrer_id])
+  @@index([referee_id])
+  @@index([status])
+}
+
+// ============================================================================
+// BIRTHDAY CLAIMS
+// ============================================================================
+
+model birthday_claims {
+  id         String   @id @default(uuid())
+  member_id  String
+  year       Int
+  points     Int
+  claimed_at DateTime @default(now())
+
+  member vip_members @relation(fields: [member_id], references: [id])
+
+  @@unique([member_id, year])
+  @@index([member_id])
 }

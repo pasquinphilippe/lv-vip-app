@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData, Link, useSearchParams } from "react-router";
+import { useLoaderData, useSearchParams } from "react-router";
 import { authenticate } from "../shopify.server";
 
 // GraphQL query for subscription contracts
@@ -123,19 +123,20 @@ export default function SubscriptionsPage() {
   };
 
   const getStatusBadge = (status: string) => {
-    const tones: Record<string, string> = {
+    const tones = {
       ACTIVE: "success",
       PAUSED: "warning",
       CANCELLED: "critical",
       FAILED: "critical",
-    };
+    } as const;
     const labels: Record<string, string> = {
       ACTIVE: "Actif",
       PAUSED: "En pause",
       CANCELLED: "Annulé",
       FAILED: "Échoué",
     };
-    return <s-badge tone={tones[status] || "info"}>{labels[status] || status}</s-badge>;
+    const tone = tones[status as keyof typeof tones] || "info";
+    return <s-badge tone={tone}>{labels[status] || status}</s-badge>;
   };
 
   const handleFilterChange = (newStatus: string) => {
@@ -150,34 +151,34 @@ export default function SubscriptionsPage() {
   };
 
   return (
-    <s-page heading="Abonnements" subheading="Gérez les contrats d'abonnement">
+    <s-page heading="Abonnements">
       {/* KPI Cards */}
-      <s-section>
-        <s-box display="flex" gap="400">
-          <s-card>
-            <s-box padding="400">
-              <s-text variant="bodySm" tone="subdued">Actifs</s-text>
-              <s-text variant="headingLg" fontWeight="bold">{stats.activeCount}</s-text>
-            </s-box>
-          </s-card>
-          <s-card>
-            <s-box padding="400">
-              <s-text variant="bodySm" tone="subdued">En pause</s-text>
-              <s-text variant="headingLg" fontWeight="bold">{stats.pausedCount}</s-text>
-            </s-box>
-          </s-card>
-          <s-card>
-            <s-box padding="400">
-              <s-text variant="bodySm" tone="subdued">MRR estimé</s-text>
-              <s-text variant="headingLg" fontWeight="bold">{formatCurrency(stats.estimatedMRR)}</s-text>
-            </s-box>
-          </s-card>
-        </s-box>
+      <s-section heading="Tableau de bord">
+        <s-stack direction="inline" gap="large">
+          <s-box padding="base" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text  color="subdued">Actifs</s-text>
+              <s-text type="strong">{stats.activeCount}</s-text>
+            </s-stack>
+          </s-box>
+          <s-box padding="base" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text  color="subdued">En pause</s-text>
+              <s-text type="strong">{stats.pausedCount}</s-text>
+            </s-stack>
+          </s-box>
+          <s-box padding="base" borderWidth="base" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text  color="subdued">MRR estimé</s-text>
+              <s-text type="strong">{formatCurrency(stats.estimatedMRR)}</s-text>
+            </s-stack>
+          </s-box>
+        </s-stack>
       </s-section>
 
       {/* Filters */}
-      <s-section>
-        <s-box display="flex" gap="200">
+      <s-section heading="Filtres">
+        <s-stack direction="inline" gap="base">
           <s-button
             variant={!filters.status ? "primary" : "secondary"}
             onClick={() => handleFilterChange("")}
@@ -202,58 +203,67 @@ export default function SubscriptionsPage() {
           >
             Annulés
           </s-button>
-        </s-box>
+        </s-stack>
       </s-section>
 
       {/* Subscriptions List */}
-      <s-section>
-        <s-card>
-          {subscriptions.length > 0 ? (
-            <s-resource-list>
-              {subscriptions.map((edge: any) => {
-                const sub = edge.node;
-                const customer = sub.customer;
-                const lines = sub.lines?.edges || [];
-                const firstLine = lines[0]?.node;
-                const totalPrice = lines.reduce((sum: number, l: any) => {
-                  return sum + parseFloat(l.node.currentPrice?.amount || 0) * (l.node.quantity || 1);
-                }, 0);
+      <s-section heading="Liste des abonnements">
+        {subscriptions.length > 0 ? (
+          <s-stack direction="block" gap="base">
+            {subscriptions.map((edge: any) => {
+              const sub = edge.node;
+              const customer = sub.customer;
+              const lines = sub.lines?.edges || [];
+              const firstLine = lines[0]?.node;
+              const totalPrice = lines.reduce((sum: number, l: any) => {
+                return sum + parseFloat(l.node.currentPrice?.amount || 0) * (l.node.quantity || 1);
+              }, 0);
 
-                return (
-                  <s-resource-item key={sub.id} url={`/app/subscriptions/${encodeURIComponent(sub.id)}`}>
-                    <s-box display="flex" justify="space-between" align="center">
-                      <s-box>
-                        <s-text fontWeight="semibold">{customer?.email || "N/A"}</s-text>
-                        <s-text variant="bodySm" tone="subdued">
+              return (
+                <s-box
+                  key={sub.id}
+                  padding="base"
+                  borderWidth="base"
+                  borderRadius="base"
+                  background="subdued"
+                >
+                  <s-link href={`/app/subscriptions/${encodeURIComponent(sub.id)}`}>
+                    <s-stack direction="inline" gap="large">
+                      <s-stack direction="block" gap="small">
+                        <s-text type="strong">{customer?.email || "N/A"}</s-text>
+                        <s-text  color="subdued">
                           {firstLine?.title || "Produit"} {lines.length > 1 && `+${lines.length - 1}`}
                         </s-text>
-                      </s-box>
-                      <s-box display="flex" gap="400" align="center">
+                      </s-stack>
+                      <s-stack direction="inline" gap="base">
                         {getStatusBadge(sub.status)}
                         <s-text>{formatCurrency(totalPrice)}</s-text>
-                        <s-text variant="bodySm" tone="subdued">
+                        <s-text  color="subdued">
                           {formatDate(sub.nextBillingDate)}
                         </s-text>
-                      </s-box>
-                    </s-box>
-                  </s-resource-item>
-                );
-              })}
-            </s-resource-list>
-          ) : (
-            <s-empty-state heading="Aucun abonnement">
+                      </s-stack>
+                    </s-stack>
+                  </s-link>
+                </s-box>
+              );
+            })}
+          </s-stack>
+        ) : (
+          <s-box padding="large">
+            <s-stack direction="block" gap="base">
+              <s-heading>Aucun abonnement</s-heading>
               <s-paragraph>
                 Les abonnements apparaîtront ici une fois que vos clients auront souscrit.
               </s-paragraph>
-            </s-empty-state>
-          )}
-        </s-card>
+            </s-stack>
+          </s-box>
+        )}
       </s-section>
 
       {/* Pagination */}
       {pageInfo.hasNextPage && (
         <s-section>
-          <s-box display="flex" justify="center">
+          <s-stack direction="inline" gap="base">
             <s-button
               onClick={() => {
                 const params = new URLSearchParams(searchParams);
@@ -263,7 +273,7 @@ export default function SubscriptionsPage() {
             >
               Charger plus
             </s-button>
-          </s-box>
+          </s-stack>
         </s-section>
       )}
     </s-page>
