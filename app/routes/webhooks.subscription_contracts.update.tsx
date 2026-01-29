@@ -4,7 +4,8 @@ import db from "../db.server";
 import {
   getShopSettings,
   downgradeTier,
-  calculateSubscriptionPoints,
+  calculateSubscriptionPurchasePoints,
+  calculateSubscriptionMilestoneBonus,
 } from "~/services/loyalty";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -93,41 +94,89 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Handle renewal (subscription billing cycle completed)
     if (previousStatus === "active" && newStatus === "active" && payload.last_payment_status === "success") {
-      const renewalPoints = calculateSubscriptionPoints({
-        isNewSubscription: false,
+      if (!settings.loyalty_enabled) {
+        return new Response(null, { status: 200 });
+      }
+
+      // Get order total from the billing attempt
+      const orderTotal = parseFloat(payload.current_order?.total_price || "0");
+
+      if (orderTotal > 0) {
+        // Award points based on order total × 200 (subscription rate)
+        const renewalPoints = calculateSubscriptionPurchasePoints(orderTotal, settings);
+
+        if (renewalPoints > 0) {
+          // Update total orders count
+          await db.vip_subscriptions.update({
+            where: { id: subscription.id },
+            data: {
+              total_orders: { increment: 1 },
+              last_billed_at: new Date(),
+            },
+          });
+
+          await db.loyalty_points_ledger.create({
+            data: {
+              member_id: subscription.member_id,
+              points: renewalPoints,
+              action: "earn_subscription_renewal",
+              description: `Renouvellement abonnement - ${orderTotal.toFixed(2)}$ × ${settings.subscription_points_per_dollar} pts`,
+              reference_type: "subscription",
+              reference_id: shopifySubscriptionId,
+            },
+          });
+
+          await db.vip_members.update({
+            where: { id: subscription.member_id },
+            data: {
+              points_balance: { increment: renewalPoints },
+              lifetime_points: { increment: renewalPoints },
+            },
+          });
+
+          console.log(`[Webhook] Awarded ${renewalPoints} renewal points (${orderTotal}$ × ${settings.subscription_points_per_dollar})`);
+        }
+      }
+
+      // Check for 3-month subscription anniversary bonus
+      const subscriptionStartDate = subscription.created_at;
+      const milestoneResult = calculateSubscriptionMilestoneBonus({
+        subscriptionStartDate,
         settings,
       });
 
-      if (renewalPoints > 0 && settings.loyalty_enabled) {
-        // Update total orders count
-        await db.vip_subscriptions.update({
-          where: { id: subscription.id },
-          data: {
-            total_orders: { increment: 1 },
-            last_billed_at: new Date(),
-          },
-        });
-
-        await db.loyalty_points_ledger.create({
-          data: {
+      if (milestoneResult.eligible && milestoneResult.bonusPoints > 0) {
+        // Check if we already awarded this milestone (prevent duplicates)
+        const existingMilestone = await db.loyalty_points_ledger.findFirst({
+          where: {
             member_id: subscription.member_id,
-            points: renewalPoints,
-            action: "earn_subscription_renewal",
-            description: "Points de renouvellement d'abonnement",
-            reference_type: "subscription",
-            reference_id: shopifySubscriptionId,
+            action: "earn_subscription_milestone",
+            description: { contains: `${milestoneResult.monthsActive} mois` },
           },
         });
 
-        await db.vip_members.update({
-          where: { id: subscription.member_id },
-          data: {
-            points_balance: { increment: renewalPoints },
-            lifetime_points: { increment: renewalPoints },
-          },
-        });
+        if (!existingMilestone) {
+          await db.loyalty_points_ledger.create({
+            data: {
+              member_id: subscription.member_id,
+              points: milestoneResult.bonusPoints,
+              action: "earn_subscription_milestone",
+              description: `Anniversaire abonnement - ${milestoneResult.monthsActive} mois! 🎉`,
+              reference_type: "subscription",
+              reference_id: shopifySubscriptionId,
+            },
+          });
 
-        console.log(`[Webhook] Awarded ${renewalPoints} renewal points`);
+          await db.vip_members.update({
+            where: { id: subscription.member_id },
+            data: {
+              points_balance: { increment: milestoneResult.bonusPoints },
+              lifetime_points: { increment: milestoneResult.bonusPoints },
+            },
+          });
+
+          console.log(`[Webhook] Awarded ${milestoneResult.bonusPoints} milestone bonus for ${milestoneResult.monthsActive} months`);
+        }
       }
     }
   } catch (error) {

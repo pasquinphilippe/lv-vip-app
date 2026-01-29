@@ -4,8 +4,7 @@ import db from "../db.server";
 import {
   getShopSettings,
   getWelcomeBonus,
-  calculateSubscriptionPoints,
-  upgradeToClubOnSubscription,
+  calculateSubscriptionPurchasePoints,
   getTierMultiplier,
   getAcademyAccess,
 } from "~/services/loyalty";
@@ -22,6 +21,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const customerEmail = payload.customer?.email;
 
     if (!customerEmail) {
+      console.log("[Webhook] No customer email, skipping");
       return new Response(null, { status: 200 });
     }
 
@@ -33,7 +33,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return new Response(null, { status: 200 });
     }
 
-    // Check if member exists, create if not
+    // Check if member exists, create if not (auto-enroll)
     let member = await db.vip_members.findUnique({
       where: { email: customerEmail },
     });
@@ -54,7 +54,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           academy_access: clubAcademy,
         },
       });
-      console.log(`[Webhook] Created new VIP member: ${member.id}`);
+      console.log(`[Webhook] Created new VIP member (auto-enrolled): ${member.id}`);
 
       // Award welcome bonus
       const welcomeBonus = getWelcomeBonus(settings);
@@ -82,7 +82,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     } else {
       // Upgrade to CLUB if currently LITE
-      await upgradeToClubOnSubscription(member.id, settings);
+      if (member.tier === "LITE") {
+        await db.vip_members.update({
+          where: { id: member.id },
+          data: {
+            tier: "CLUB",
+            tier_started_at: new Date(),
+            points_multiplier: clubMultiplier,
+            academy_access: clubAcademy,
+          },
+        });
+        console.log(`[Webhook] Upgraded member ${member.id} to CLUB tier`);
+      }
     }
 
     // Create subscription record in our database
@@ -100,33 +111,34 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
     console.log(`[Webhook] Created subscription record for member ${member.id}`);
 
-    // Award subscription points
-    const subscriptionPoints = calculateSubscriptionPoints({
-      isNewSubscription: true,
-      settings,
-    });
+    // Award points based on order total × 200 (subscription rate)
+    const orderTotal = parseFloat(payload.origin_order?.total_price || payload.current_order?.total_price || "0");
+    
+    if (orderTotal > 0) {
+      const earnedPoints = calculateSubscriptionPurchasePoints(orderTotal, settings);
 
-    if (subscriptionPoints > 0) {
-      await db.loyalty_points_ledger.create({
-        data: {
-          member_id: member.id,
-          points: subscriptionPoints,
-          action: "earn_subscription",
-          description: "Points d'abonnement",
-          reference_type: "subscription",
-          reference_id: payload.admin_graphql_api_id,
-        },
-      });
+      if (earnedPoints > 0) {
+        await db.loyalty_points_ledger.create({
+          data: {
+            member_id: member.id,
+            points: earnedPoints,
+            action: "earn_subscription_purchase",
+            description: `Achat abonnement - ${orderTotal.toFixed(2)}$ × ${settings.subscription_points_per_dollar} pts`,
+            reference_type: "subscription",
+            reference_id: payload.admin_graphql_api_id,
+          },
+        });
 
-      await db.vip_members.update({
-        where: { id: member.id },
-        data: {
-          points_balance: { increment: subscriptionPoints },
-          lifetime_points: { increment: subscriptionPoints },
-        },
-      });
+        await db.vip_members.update({
+          where: { id: member.id },
+          data: {
+            points_balance: { increment: earnedPoints },
+            lifetime_points: { increment: earnedPoints },
+          },
+        });
 
-      console.log(`[Webhook] Awarded ${subscriptionPoints} subscription points`);
+        console.log(`[Webhook] Awarded ${earnedPoints} subscription purchase points (${orderTotal}$ × ${settings.subscription_points_per_dollar})`);
+      }
     }
   } catch (error) {
     console.error("[Webhook] Error processing subscription create:", error);
