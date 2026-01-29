@@ -24,21 +24,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     recentRedemptions,
     totalPointsInCirculation,
   ] = await Promise.all([
-    // Total VIP members
     prisma.vip_members.count(),
-
-    // Tier breakdown
     prisma.vip_members.groupBy({
       by: ["tier"],
       _count: { id: true },
     }),
-
-    // Active subscriptions
     prisma.vip_subscriptions.count({
       where: { status: "active" },
     }),
-
-    // Points awarded today
     prisma.loyalty_points_ledger.aggregate({
       _sum: { points: true },
       where: {
@@ -46,8 +39,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         created_at: { gte: startOfToday },
       },
     }),
-
-    // Points awarded this week
     prisma.loyalty_points_ledger.aggregate({
       _sum: { points: true },
       where: {
@@ -55,8 +46,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         created_at: { gte: startOfWeek },
       },
     }),
-
-    // Points awarded this month
     prisma.loyalty_points_ledger.aggregate({
       _sum: { points: true },
       where: {
@@ -64,32 +53,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         created_at: { gte: startOfMonth },
       },
     }),
-
-    // Recent activity (last 20 events)
     prisma.loyalty_points_ledger.findMany({
       orderBy: { created_at: "desc" },
-      take: 20,
+      take: 10,
       include: {
         member: {
           select: { email: true, first_name: true, last_name: true, tier: true },
         },
       },
     }),
-
-    // Recent redemptions count (30 days)
     prisma.loyalty_redemptions.count({
       where: {
         created_at: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
       },
     }),
-
-    // Total points in circulation
     prisma.vip_members.aggregate({
       _sum: { points_balance: true },
     }),
   ]);
 
-  // Build tier map
   const tiers = tierCounts.reduce(
     (acc, { tier, _count }) => {
       acc[tier] = _count.id;
@@ -98,19 +80,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     {} as Record<string, number>,
   );
 
-  // Estimate MRR from active subscriptions (rough: avg $49/cycle * 4 weeks)
-  // For simplicity, get subscription data
   const subscriptionBreakdown = await prisma.vip_subscriptions.groupBy({
     by: ["cadence"],
     where: { status: "active" },
     _count: { id: true },
   });
 
-  // Estimate MRR based on cadence (Coloration Pro = simpler, $49 avg)
   let estimatedMRR = 0;
   for (const sub of subscriptionBreakdown) {
     const count = sub._count.id;
-    const avgPrice = 49; // Coloration Pro avg
+    const avgPrice = 49;
     const weeksPerCycle =
       sub.cadence === "4_weeks" ? 4 : sub.cadence === "5_weeks" ? 5 : 6;
     const monthlyMultiplier = 4.33 / weeksPerCycle;
@@ -151,28 +130,27 @@ export default function Index() {
     CLUB_PLUS: "Club+",
   };
 
-  const tierColors: Record<string, "info" | "success" | "warning"> = {
-    LITE: "info",
-    CLUB: "success",
-    CLUB_PLUS: "warning",
-  };
-
   const actionLabels: Record<string, string> = {
-    earn_purchase: "🛒 Achat",
-    earn_subscription: "🔄 Abonnement",
-    earn_milestone: "🏆 Passage de niveau",
-    earn_referral: "🤝 Parrainage",
-    earn_birthday: "🎂 Anniversaire",
-    earn_welcome: "👋 Bienvenue",
-    redeem: "🎁 Échange",
-    expire: "⏰ Expiration",
+    earn_purchase: "Achat",
+    earn_subscription: "Abonnement",
+    earn_milestone: "Niveau",
+    earn_referral: "Parrainage",
+    earn_birthday: "Anniversaire",
+    earn_welcome: "Bienvenue",
+    redeem: "Échange",
+    expire: "Expiration",
   };
 
   const formatCurrency = (amount: number) =>
     new Intl.NumberFormat("fr-CA", {
       style: "currency",
       currency: "CAD",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
     }).format(amount);
+
+  const formatNumber = (num: number) =>
+    new Intl.NumberFormat("fr-CA").format(num);
 
   const formatDate = (dateStr: string) => {
     const d = new Date(dateStr);
@@ -182,190 +160,202 @@ export default function Index() {
     const diffH = Math.floor(diffMs / 3600000);
 
     if (diffMin < 1) return "À l'instant";
-    if (diffMin < 60) return `Il y a ${diffMin} min`;
-    if (diffH < 24) return `Il y a ${diffH}h`;
-    return d.toLocaleDateString("fr-CA", {
-      day: "numeric",
-      month: "short",
-    });
+    if (diffMin < 60) return `${diffMin} min`;
+    if (diffH < 24) return `${diffH}h`;
+    return d.toLocaleDateString("fr-CA", { day: "numeric", month: "short" });
   };
 
   return (
-    <s-page heading="Tableau de bord VIP">
-      {/* Quick Actions */}
-      <s-button slot="primary-action" href="/app/rewards">
+    <s-page heading="Programme VIP" inlineSize="base">
+      <s-button slot="primary-action" variant="primary" href="/app/rewards">
         Gérer les récompenses
       </s-button>
+      <s-button slot="secondary-action" href="/app/customers">
+        Voir les clients
+      </s-button>
 
-      {/* KPI Cards Row 1 */}
-      <s-section heading="Vue d'ensemble">
-        <s-stack direction="inline" gap="large">
-          <s-box padding="large" borderWidth="base" borderRadius="base">
-            <s-stack direction="block" gap="small">
-              <s-text color="subdued">Membres VIP</s-text>
-              <s-text type="strong">{data.totalMembers}</s-text>
+      {/* Metrics Cards Row */}
+      <s-section padding="base">
+        <s-grid
+          gridTemplateColumns="@container (inline-size <= 500px) 1fr 1fr, 1fr 1fr 1fr 1fr"
+          gap="base"
+        >
+          {/* Members */}
+          <s-clickable
+            href="/app/customers"
+            paddingBlock="small-400"
+            paddingInline="base"
+            borderRadius="base"
+          >
+            <s-stack direction="block" gap="small-200">
+              <s-text tone="subdued">Membres VIP</s-text>
+              <s-heading>{formatNumber(data.totalMembers)}</s-heading>
+              <s-stack direction="inline" gap="small-100">
+                <s-badge tone="info">{data.tiers.LITE || 0} Lite</s-badge>
+                <s-badge tone="success">{data.tiers.CLUB || 0} Club</s-badge>
+              </s-stack>
             </s-stack>
-          </s-box>
-          <s-box padding="large" borderWidth="base" borderRadius="base">
-            <s-stack direction="block" gap="small">
-              <s-text color="subdued">Abonnements actifs</s-text>
-              <s-text type="strong">{data.activeSubscriptions}</s-text>
-            </s-stack>
-          </s-box>
-          <s-box padding="large" borderWidth="base" borderRadius="base">
-            <s-stack direction="block" gap="small">
-              <s-text color="subdued">MRR estimé</s-text>
-              <s-text type="strong">
-                {formatCurrency(data.estimatedMRR)}
+          </s-clickable>
+
+          {/* Subscriptions */}
+          <s-clickable
+            href="/app/subscriptions"
+            paddingBlock="small-400"
+            paddingInline="base"
+            borderRadius="base"
+          >
+            <s-stack direction="block" gap="small-200">
+              <s-text tone="subdued">Abonnements</s-text>
+              <s-heading>{formatNumber(data.activeSubscriptions)}</s-heading>
+              <s-text tone="subdued">
+                MRR: {formatCurrency(data.estimatedMRR)}
               </s-text>
             </s-stack>
-          </s-box>
-          <s-box padding="large" borderWidth="base" borderRadius="base">
-            <s-stack direction="block" gap="small">
-              <s-text color="subdued">Points en circulation</s-text>
-              <s-text type="strong">
-                {data.totalPointsInCirculation.toLocaleString("fr-CA")}
+          </s-clickable>
+
+          {/* Points This Month */}
+          <s-clickable
+            href="/app/loyalty"
+            paddingBlock="small-400"
+            paddingInline="base"
+            borderRadius="base"
+          >
+            <s-stack direction="block" gap="small-200">
+              <s-text tone="subdued">Points ce mois</s-text>
+              <s-heading>{formatNumber(data.pointsMonth)}</s-heading>
+              <s-stack direction="inline" gap="small-100">
+                <s-badge tone="success">+{formatNumber(data.pointsToday)} auj.</s-badge>
+              </s-stack>
+            </s-stack>
+          </s-clickable>
+
+          {/* Points in Circulation */}
+          <s-clickable
+            href="/app/loyalty"
+            paddingBlock="small-400"
+            paddingInline="base"
+            borderRadius="base"
+          >
+            <s-stack direction="block" gap="small-200">
+              <s-text tone="subdued">En circulation</s-text>
+              <s-heading>{formatNumber(data.totalPointsInCirculation)}</s-heading>
+              <s-text tone="subdued">
+                {data.recentRedemptions} échanges (30j)
               </s-text>
             </s-stack>
-          </s-box>
-        </s-stack>
+          </s-clickable>
+        </s-grid>
       </s-section>
 
       {/* Tier Breakdown */}
-      <s-section heading="Répartition par niveau">
-        <s-stack direction="inline" gap="large">
-          {(["LITE", "CLUB", "CLUB_PLUS"] as const).map((tier) => (
-            <s-box
-              key={tier}
-              padding="large"
-              borderWidth="base"
-              borderRadius="base"
-            >
-              <s-stack direction="block" gap="small">
-                <s-badge tone={tierColors[tier]}>{tierLabels[tier]}</s-badge>
-                <s-text type="strong">{data.tiers[tier] || 0}</s-text>
-                <s-text color="subdued">
-                  {data.totalMembers > 0
-                    ? `${Math.round(((data.tiers[tier] || 0) / data.totalMembers) * 100)}%`
-                    : "0%"}
-                </s-text>
-              </s-stack>
-            </s-box>
-          ))}
-        </s-stack>
+      <s-section heading="Répartition">
+        <s-grid gridTemplateColumns="1fr 1fr 1fr" gap="base">
+          <s-box padding="base" background="subdued" borderRadius="base">
+            <s-stack direction="block" gap="small-200">
+              <s-badge tone="info">Lite</s-badge>
+              <s-heading>{data.tiers.LITE || 0}</s-heading>
+              <s-text tone="subdued">
+                {data.totalMembers > 0
+                  ? `${Math.round(((data.tiers.LITE || 0) / data.totalMembers) * 100)}%`
+                  : "0%"}
+              </s-text>
+            </s-stack>
+          </s-box>
+          <s-box padding="base" background="subdued" borderRadius="base">
+            <s-stack direction="block" gap="small-200">
+              <s-badge tone="success">Club</s-badge>
+              <s-heading>{data.tiers.CLUB || 0}</s-heading>
+              <s-text tone="subdued">
+                {data.totalMembers > 0
+                  ? `${Math.round(((data.tiers.CLUB || 0) / data.totalMembers) * 100)}%`
+                  : "0%"}
+              </s-text>
+            </s-stack>
+          </s-box>
+          <s-box padding="base" background="subdued" borderRadius="base">
+            <s-stack direction="block" gap="small-200">
+              <s-badge tone="warning">Club+</s-badge>
+              <s-heading>{data.tiers.CLUB_PLUS || 0}</s-heading>
+              <s-text tone="subdued">
+                {data.totalMembers > 0
+                  ? `${Math.round(((data.tiers.CLUB_PLUS || 0) / data.totalMembers) * 100)}%`
+                  : "0%"}
+              </s-text>
+            </s-stack>
+          </s-box>
+        </s-grid>
       </s-section>
 
-      {/* Points Activity */}
-      <s-section heading="Points attribués">
-        <s-stack direction="inline" gap="large">
-          <s-box padding="large" borderWidth="base" borderRadius="base">
-            <s-stack direction="block" gap="small">
-              <s-text color="subdued">Aujourd'hui</s-text>
-              <s-text type="strong">
-                {data.pointsToday.toLocaleString("fr-CA")}
-              </s-text>
-            </s-stack>
-          </s-box>
-          <s-box padding="large" borderWidth="base" borderRadius="base">
-            <s-stack direction="block" gap="small">
-              <s-text color="subdued">Cette semaine</s-text>
-              <s-text type="strong">
-                {data.pointsWeek.toLocaleString("fr-CA")}
-              </s-text>
-            </s-stack>
-          </s-box>
-          <s-box padding="large" borderWidth="base" borderRadius="base">
-            <s-stack direction="block" gap="small">
-              <s-text color="subdued">Ce mois</s-text>
-              <s-text type="strong">
-                {data.pointsMonth.toLocaleString("fr-CA")}
-              </s-text>
-            </s-stack>
-          </s-box>
-          <s-box padding="large" borderWidth="base" borderRadius="base">
-            <s-stack direction="block" gap="small">
-              <s-text color="subdued">Échanges (30j)</s-text>
-              <s-text type="strong">{data.recentRedemptions}</s-text>
-            </s-stack>
-          </s-box>
-        </s-stack>
-      </s-section>
-
-      {/* Recent Activity Feed */}
-      <s-section heading="Activité récente">
+      {/* Recent Activity */}
+      <s-section heading="Activité récente" padding="none">
         {data.recentActivity.length > 0 ? (
-          <s-stack direction="block" gap="small">
-            {data.recentActivity.map((activity) => (
-              <s-box
-                key={activity.id}
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <s-stack direction="inline" gap="large">
-                  <s-stack direction="block" gap="small">
-                    <s-stack direction="inline" gap="base">
-                      <s-text type="strong">
-                        {activity.memberName || activity.memberEmail}
+          <s-table>
+            <s-table-header-row>
+              <s-table-header listSlot="primary">Client</s-table-header>
+              <s-table-header listSlot="secondary">Action</s-table-header>
+              <s-table-header format="numeric">Points</s-table-header>
+              <s-table-header>Quand</s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {data.recentActivity.map((activity) => (
+                <s-table-row key={activity.id}>
+                  <s-table-cell>
+                    <s-stack direction="inline" gap="small-200">
+                      <s-text>
+                        {activity.memberName || activity.memberEmail.split("@")[0]}
                       </s-text>
                       <s-badge
-                        tone={tierColors[activity.memberTier] || "info"}
+                        tone={
+                          activity.memberTier === "CLUB_PLUS"
+                            ? "warning"
+                            : activity.memberTier === "CLUB"
+                            ? "success"
+                            : "info"
+                        }
                       >
-                        {tierLabels[activity.memberTier] || activity.memberTier}
+                        {tierLabels[activity.memberTier]}
                       </s-badge>
                     </s-stack>
-                    <s-text color="subdued">
-                      {actionLabels[activity.action] || activity.action}
-                      {activity.description ? ` — ${activity.description}` : ""}
-                    </s-text>
-                  </s-stack>
-                  <s-stack direction="inline" gap="base">
-                    <s-badge
-                      tone={activity.points > 0 ? "success" : "critical"}
-                    >
-                      {activity.points > 0 ? "+" : ""}
-                      {activity.points} pts
+                  </s-table-cell>
+                  <s-table-cell>
+                    {actionLabels[activity.action] || activity.action}
+                  </s-table-cell>
+                  <s-table-cell>
+                    <s-badge tone={activity.points > 0 ? "success" : "critical"}>
+                      {activity.points > 0 ? "+" : ""}{activity.points}
                     </s-badge>
-                    <s-text color="subdued">
-                      {formatDate(activity.createdAt)}
-                    </s-text>
-                  </s-stack>
-                </s-stack>
-              </s-box>
-            ))}
-          </s-stack>
+                  </s-table-cell>
+                  <s-table-cell>
+                    <s-text tone="subdued">{formatDate(activity.createdAt)}</s-text>
+                  </s-table-cell>
+                </s-table-row>
+              ))}
+            </s-table-body>
+          </s-table>
         ) : (
           <s-box padding="large">
             <s-stack direction="block" gap="base">
-              <s-text type="strong">Aucune activité</s-text>
+              <s-heading>Aucune activité</s-heading>
               <s-paragraph>
                 L'activité VIP apparaîtra ici dès que vos clients commenceront
-                à gagner et échanger des points.
+                à gagner des points.
               </s-paragraph>
+              <s-button variant="primary" href="/app/settings/points">
+                Configurer les points
+              </s-button>
             </s-stack>
           </s-box>
         )}
       </s-section>
 
-      {/* Quick Links - Aside */}
-      <s-section slot="aside" heading="Accès rapide">
-        <s-stack direction="block" gap="base">
-          <s-button href="/app/rewards" variant="secondary">
-            🎁 Récompenses
-          </s-button>
-          <s-button href="/app/loyalty" variant="secondary">
-            ⭐ Programme VIP
-          </s-button>
-          <s-button href="/app/subscriptions" variant="secondary">
-            🔄 Abonnements
-          </s-button>
-          <s-button href="/app/customers" variant="secondary">
-            👥 Clients
-          </s-button>
-          <s-button href="/app/settings" variant="secondary">
-            ⚙️ Paramètres
-          </s-button>
+      {/* Sidebar - Quick Links */}
+      <s-section slot="aside" heading="Navigation">
+        <s-stack direction="block" gap="small-200">
+          <s-link href="/app/rewards">Récompenses</s-link>
+          <s-link href="/app/customers">Clients VIP</s-link>
+          <s-link href="/app/subscriptions">Abonnements</s-link>
+          <s-link href="/app/loyalty">Programme</s-link>
+          <s-link href="/app/settings">Paramètres</s-link>
         </s-stack>
       </s-section>
 
@@ -374,6 +364,11 @@ export default function Index() {
           Programme de fidélité pour lucvincentcoloration.com — points sur
           achats, abonnements et add-ons.
         </s-paragraph>
+        <s-stack direction="block" gap="small-200">
+          <s-link href="https://lucvincentcoloration.com" target="_blank">
+            Voir la boutique →
+          </s-link>
+        </s-stack>
       </s-section>
     </s-page>
   );

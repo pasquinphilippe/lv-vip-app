@@ -1,9 +1,6 @@
-import { useState } from "react";
-import type {
-  ActionFunctionArgs,
-  LoaderFunctionArgs,
-} from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useFetcher } from "react-router";
+import React from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
@@ -11,7 +8,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
 
   const rewards = await prisma.loyalty_rewards.findMany({
-    orderBy: [{ sort_order: "asc" }, { created_at: "desc" }],
+    orderBy: [{ is_active: "desc" }, { sort_order: "asc" }, { created_at: "desc" }],
     include: {
       _count: {
         select: { redemptions: true },
@@ -31,43 +28,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (intent === "create") {
     const name = formData.get("name") as string;
     const name_fr = formData.get("name_fr") as string;
-    const description = (formData.get("description") as string) || null;
-    const description_fr = (formData.get("description_fr") as string) || null;
     const type = formData.get("type") as string;
     const points_cost = parseInt(formData.get("points_cost") as string, 10);
     const discount_value = formData.get("discount_value")
       ? parseFloat(formData.get("discount_value") as string)
       : null;
     const discount_type = (formData.get("discount_type") as string) || null;
-    const brand = (formData.get("brand") as string) || "both";
     const tier_required = (formData.get("tier_required") as string) || null;
-    const stock_limited = formData.get("stock_limited") === "true";
-    const stock_count = formData.get("stock_count")
-      ? parseInt(formData.get("stock_count") as string, 10)
-      : null;
 
-    if (!name || !type || !points_cost) {
+    if (!name_fr || !type || !points_cost) {
       return { error: "Nom, type et coût en points requis." };
     }
 
     await prisma.loyalty_rewards.create({
       data: {
-        name,
-        name_fr: name_fr || null,
-        description,
-        description_fr,
+        name: name || name_fr,
+        name_fr,
         type,
         points_cost,
         discount_value,
         discount_type,
-        brand,
         tier_required: tier_required || null,
-        stock_limited,
-        stock_count: stock_limited ? stock_count : null,
+        brand: "coloration",
       },
     });
 
-    return { success: true, message: "Récompense créée avec succès." };
+    return { success: true };
   }
 
   if (intent === "toggle") {
@@ -84,23 +70,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "delete") {
     const id = formData.get("id") as string;
-    // Check if reward has redemptions
     const redemptionCount = await prisma.loyalty_redemptions.count({
       where: { reward_id: id },
     });
     if (redemptionCount > 0) {
-      // Soft delete: deactivate instead
       await prisma.loyalty_rewards.update({
         where: { id },
         data: { is_active: false },
       });
-      return {
-        success: true,
-        message: "Récompense désactivée (des échanges existent).",
-      };
+    } else {
+      await prisma.loyalty_rewards.delete({ where: { id } });
     }
-    await prisma.loyalty_rewards.delete({ where: { id } });
-    return { success: true, message: "Récompense supprimée." };
+    return { success: true };
   }
 
   return { error: "Action inconnue." };
@@ -109,7 +90,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function RewardsPage() {
   const { rewards } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
-  const [showForm, setShowForm] = useState(false);
+
+  // Toast notifications on action completion
+  React.useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data) {
+      if (fetcher.data.success) {
+        shopify.toast.show("Action réussie", { duration: 3000 });
+      } else if (fetcher.data.error) {
+        shopify.toast.show(fetcher.data.error, { isError: true });
+      }
+    }
+  }, [fetcher.state, fetcher.data]);
+
+  const typeLabels: Record<string, string> = {
+    discount: "Rabais $",
+    percentage: "Rabais %",
+    shipping: "Livraison",
+    product: "Produit",
+  };
 
   const tierLabels: Record<string, string> = {
     LITE: "Lite",
@@ -117,475 +115,211 @@ export default function RewardsPage() {
     CLUB_PLUS: "Club+",
   };
 
-  const tierColors: Record<string, "info" | "success" | "warning"> = {
-    LITE: "info",
-    CLUB: "success",
-    CLUB_PLUS: "warning",
-  };
+  const isSubmitting = fetcher.state !== "idle";
 
-  const typeLabels: Record<string, string> = {
-    discount: "Rabais",
-    shipping: "Livraison",
-    product: "Produit",
-    add_on: "Add-on",
-    experience: "Expérience",
-    exclusive: "Exclusif",
-  };
-
-  const isSubmitting =
-    fetcher.state === "submitting" || fetcher.state === "loading";
+  const activeRewards = rewards.filter((r) => r.is_active);
+  const totalRedemptions = rewards.reduce((sum, r) => sum + (r._count?.redemptions || 0), 0);
 
   return (
-    <s-page heading="Récompenses">
-      <s-button
-        slot="primary-action"
-        onClick={() => setShowForm(!showForm)}
-        variant="primary"
-      >
-        {showForm ? "Annuler" : "Ajouter une récompense"}
+    <s-page heading="Récompenses" inlineSize="base">
+      <s-button slot="primary-action" variant="primary" commandFor="create-reward-modal">
+        Créer une récompense
       </s-button>
 
-      {/* Create Form */}
-      {showForm && (
-        <s-section heading="Nouvelle récompense">
-          <fetcher.Form method="post">
-            <input type="hidden" name="intent" value="create" />
-            <s-stack direction="block" gap="large">
-              {/* Names */}
-              <s-stack direction="inline" gap="base">
-                <s-box padding="base" borderWidth="base" borderRadius="base">
-                  <s-stack direction="block" gap="small">
-                    <label htmlFor="name">
-                      <s-text type="strong">Nom (EN)</s-text>
-                    </label>
-                    <input
-                      id="name"
-                      name="name"
-                      type="text"
-                      required
-                      placeholder="Free Shipping"
-                      style={{
-                        width: "100%",
-                        padding: "8px",
-                        borderRadius: "4px",
-                        border: "1px solid #ccc",
-                      }}
-                    />
-                  </s-stack>
-                </s-box>
-                <s-box padding="base" borderWidth="base" borderRadius="base">
-                  <s-stack direction="block" gap="small">
-                    <label htmlFor="name_fr">
-                      <s-text type="strong">Nom (FR)</s-text>
-                    </label>
-                    <input
-                      id="name_fr"
-                      name="name_fr"
-                      type="text"
-                      required
-                      placeholder="Livraison gratuite"
-                      style={{
-                        width: "100%",
-                        padding: "8px",
-                        borderRadius: "4px",
-                        border: "1px solid #ccc",
-                      }}
-                    />
-                  </s-stack>
-                </s-box>
-              </s-stack>
-
-              {/* Descriptions */}
-              <s-stack direction="inline" gap="base">
-                <s-box padding="base" borderWidth="base" borderRadius="base">
-                  <s-stack direction="block" gap="small">
-                    <label htmlFor="description">
-                      <s-text type="strong">Description (EN)</s-text>
-                    </label>
-                    <textarea
-                      id="description"
-                      name="description"
-                      rows={2}
-                      placeholder="Optional description"
-                      style={{
-                        width: "100%",
-                        padding: "8px",
-                        borderRadius: "4px",
-                        border: "1px solid #ccc",
-                      }}
-                    />
-                  </s-stack>
-                </s-box>
-                <s-box padding="base" borderWidth="base" borderRadius="base">
-                  <s-stack direction="block" gap="small">
-                    <label htmlFor="description_fr">
-                      <s-text type="strong">Description (FR)</s-text>
-                    </label>
-                    <textarea
-                      id="description_fr"
-                      name="description_fr"
-                      rows={2}
-                      placeholder="Description optionnelle"
-                      style={{
-                        width: "100%",
-                        padding: "8px",
-                        borderRadius: "4px",
-                        border: "1px solid #ccc",
-                      }}
-                    />
-                  </s-stack>
-                </s-box>
-              </s-stack>
-
-              {/* Type, Points, Value */}
-              <s-stack direction="inline" gap="base">
-                <s-box padding="base" borderWidth="base" borderRadius="base">
-                  <s-stack direction="block" gap="small">
-                    <label htmlFor="type">
-                      <s-text type="strong">Type</s-text>
-                    </label>
-                    <select
-                      id="type"
-                      name="type"
-                      required
-                      style={{
-                        width: "100%",
-                        padding: "8px",
-                        borderRadius: "4px",
-                        border: "1px solid #ccc",
-                      }}
-                    >
-                      <option value="discount">Rabais</option>
-                      <option value="shipping">Livraison</option>
-                      <option value="product">Produit</option>
-                      <option value="add_on">Add-on</option>
-                      <option value="experience">Expérience</option>
-                      <option value="exclusive">Exclusif</option>
-                    </select>
-                  </s-stack>
-                </s-box>
-                <s-box padding="base" borderWidth="base" borderRadius="base">
-                  <s-stack direction="block" gap="small">
-                    <label htmlFor="points_cost">
-                      <s-text type="strong">Coût en points</s-text>
-                    </label>
-                    <input
-                      id="points_cost"
-                      name="points_cost"
-                      type="number"
-                      required
-                      min="1"
-                      placeholder="100"
-                      style={{
-                        width: "100%",
-                        padding: "8px",
-                        borderRadius: "4px",
-                        border: "1px solid #ccc",
-                      }}
-                    />
-                  </s-stack>
-                </s-box>
-                <s-box padding="base" borderWidth="base" borderRadius="base">
-                  <s-stack direction="block" gap="small">
-                    <label htmlFor="discount_value">
-                      <s-text type="strong">Valeur du rabais ($)</s-text>
-                    </label>
-                    <input
-                      id="discount_value"
-                      name="discount_value"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      placeholder="5.00"
-                      style={{
-                        width: "100%",
-                        padding: "8px",
-                        borderRadius: "4px",
-                        border: "1px solid #ccc",
-                      }}
-                    />
-                  </s-stack>
-                </s-box>
-              </s-stack>
-
-              {/* Discount Type, Brand, Tier */}
-              <s-stack direction="inline" gap="base">
-                <s-box padding="base" borderWidth="base" borderRadius="base">
-                  <s-stack direction="block" gap="small">
-                    <label htmlFor="discount_type">
-                      <s-text type="strong">Type de rabais</s-text>
-                    </label>
-                    <select
-                      id="discount_type"
-                      name="discount_type"
-                      style={{
-                        width: "100%",
-                        padding: "8px",
-                        borderRadius: "4px",
-                        border: "1px solid #ccc",
-                      }}
-                    >
-                      <option value="">Aucun</option>
-                      <option value="fixed_amount">Montant fixe ($)</option>
-                      <option value="percentage">Pourcentage (%)</option>
-                    </select>
-                  </s-stack>
-                </s-box>
-                <s-box padding="base" borderWidth="base" borderRadius="base">
-                  <s-stack direction="block" gap="small">
-                    <label htmlFor="brand">
-                      <s-text type="strong">Marque</s-text>
-                    </label>
-                    <select
-                      id="brand"
-                      name="brand"
-                      style={{
-                        width: "100%",
-                        padding: "8px",
-                        borderRadius: "4px",
-                        border: "1px solid #ccc",
-                      }}
-                    >
-                      <option value="both">Les deux</option>
-                      <option value="coloration">Coloration Pro</option>
-                      <option value="haircare">Haircare</option>
-                    </select>
-                  </s-stack>
-                </s-box>
-                <s-box padding="base" borderWidth="base" borderRadius="base">
-                  <s-stack direction="block" gap="small">
-                    <label htmlFor="tier_required">
-                      <s-text type="strong">Niveau requis</s-text>
-                    </label>
-                    <select
-                      id="tier_required"
-                      name="tier_required"
-                      style={{
-                        width: "100%",
-                        padding: "8px",
-                        borderRadius: "4px",
-                        border: "1px solid #ccc",
-                      }}
-                    >
-                      <option value="">Tous les niveaux</option>
-                      <option value="CLUB">Club</option>
-                      <option value="CLUB_PLUS">Club+</option>
-                    </select>
-                  </s-stack>
-                </s-box>
-              </s-stack>
-
-              {/* Stock */}
-              <s-stack direction="inline" gap="base">
-                <s-box padding="base" borderWidth="base" borderRadius="base">
-                  <s-stack direction="block" gap="small">
-                    <label htmlFor="stock_limited">
-                      <s-text type="strong">Stock limité?</s-text>
-                    </label>
-                    <select
-                      id="stock_limited"
-                      name="stock_limited"
-                      style={{
-                        width: "100%",
-                        padding: "8px",
-                        borderRadius: "4px",
-                        border: "1px solid #ccc",
-                      }}
-                    >
-                      <option value="false">Non — illimité</option>
-                      <option value="true">Oui — limité</option>
-                    </select>
-                  </s-stack>
-                </s-box>
-                <s-box padding="base" borderWidth="base" borderRadius="base">
-                  <s-stack direction="block" gap="small">
-                    <label htmlFor="stock_count">
-                      <s-text type="strong">Quantité en stock</s-text>
-                    </label>
-                    <input
-                      id="stock_count"
-                      name="stock_count"
-                      type="number"
-                      min="0"
-                      placeholder="50"
-                      style={{
-                        width: "100%",
-                        padding: "8px",
-                        borderRadius: "4px",
-                        border: "1px solid #ccc",
-                      }}
-                    />
-                  </s-stack>
-                </s-box>
-              </s-stack>
-
-              {/* Submit */}
-              <s-stack direction="inline" gap="base">
-                <s-button
-                  variant="primary"
-                  onClick={() => {
-                    const form = document.querySelector(
-                      'form[method="post"]',
-                    ) as HTMLFormElement;
-                    form?.requestSubmit();
-                  }}
-                  {...(isSubmitting ? { loading: true } : {})}
-                >
-                  Créer la récompense
-                </s-button>
-                <s-button
-                  variant="tertiary"
-                  onClick={() => setShowForm(false)}
-                >
-                  Annuler
-                </s-button>
-              </s-stack>
-
-              {fetcher.data?.error && (
-                <s-box padding="base" borderWidth="base">
-                  <s-text >{fetcher.data.error}</s-text>
-                </s-box>
-              )}
-              {fetcher.data?.success && (
-                <s-box padding="base" borderWidth="base">
-                  <s-text >
-                    {fetcher.data.message || "Succès!"}
-                  </s-text>
-                </s-box>
-              )}
+      {/* Stats */}
+      <s-section padding="base">
+        <s-grid
+          gridTemplateColumns="@container (inline-size <= 400px) 1fr, 1fr auto 1fr auto 1fr"
+          gap="small-200"
+        >
+          <s-box paddingBlock="small-400" paddingInline="base">
+            <s-stack direction="block" gap="small-200">
+              <s-text tone="subdued">Total</s-text>
+              <s-heading>{rewards.length}</s-heading>
             </s-stack>
-          </fetcher.Form>
-        </s-section>
-      )}
+          </s-box>
+          <s-divider direction="block" />
+          <s-box paddingBlock="small-400" paddingInline="base">
+            <s-stack direction="block" gap="small-200">
+              <s-text tone="subdued">Actives</s-text>
+              <s-heading>{activeRewards.length}</s-heading>
+            </s-stack>
+          </s-box>
+          <s-divider direction="block" />
+          <s-box paddingBlock="small-400" paddingInline="base">
+            <s-stack direction="block" gap="small-200">
+              <s-text tone="subdued">Échanges</s-text>
+              <s-heading>{totalRedemptions}</s-heading>
+            </s-stack>
+          </s-box>
+        </s-grid>
+      </s-section>
 
-      {/* Rewards List */}
-      <s-section heading={`${rewards.length} récompenses`}>
+      {/* Rewards Table */}
+      <s-section heading="Catalogue" padding="none">
         {rewards.length > 0 ? (
-          <s-stack direction="block" gap="base">
-            {rewards.map((reward: any) => (
-              <s-box
-                key={reward.id}
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background={reward.is_active ? "subdued" : undefined}
-              >
-                <s-stack direction="inline" gap="large">
-                  {/* Info */}
-                  <s-stack direction="block" gap="small">
-                    <s-stack direction="inline" gap="base">
-                      <s-link href={`/app/rewards/${reward.id}`}>
-                        <s-text type="strong">
-                          {reward.name_fr || reward.name}
-                        </s-text>
-                      </s-link>
-                      {!reward.is_active && (
-                        <s-badge tone="critical">Inactif</s-badge>
+          <s-table>
+            <s-table-header-row>
+              <s-table-header listSlot="primary">Récompense</s-table-header>
+              <s-table-header listSlot="secondary">Type</s-table-header>
+              <s-table-header format="numeric">Coût</s-table-header>
+              <s-table-header format="numeric">Échanges</s-table-header>
+              <s-table-header>Statut</s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {rewards.map((reward) => (
+                <s-table-row key={reward.id}>
+                  <s-table-cell>
+                    <s-stack direction="block" gap="small-100">
+                      <s-text>{reward.name_fr || reward.name}</s-text>
+                      {reward.tier_required && (
+                        <s-badge tone="warning">
+                          {tierLabels[reward.tier_required]} min
+                        </s-badge>
                       )}
                     </s-stack>
-                    {(reward.description_fr || reward.description) && (
-                      <s-text color="subdued">
-                        {reward.description_fr || reward.description}
-                      </s-text>
-                    )}
-                  </s-stack>
-
-                  {/* Meta */}
-                  <s-stack direction="inline" gap="base">
-                    <s-badge tone="info">
-                      {typeLabels[reward.type] || reward.type}
-                    </s-badge>
-                    <s-text type="strong">{reward.points_cost} pts</s-text>
-                    {reward.discount_value && (
-                      <s-text color="subdued">
-                        {reward.discount_type === "percentage"
-                          ? `${reward.discount_value}%`
-                          : `${reward.discount_value}$`}
-                      </s-text>
-                    )}
-                    {reward.tier_required && (
-                      <s-badge
-                        tone={tierColors[reward.tier_required] || "info"}
-                      >
-                        {tierLabels[reward.tier_required] || reward.tier_required}
+                  </s-table-cell>
+                  <s-table-cell>
+                    <s-stack direction="inline" gap="small-100">
+                      <s-text>{typeLabels[reward.type] || reward.type}</s-text>
+                      {reward.discount_value && (
+                        <s-text tone="subdued">
+                          ({reward.discount_type === "percentage"
+                            ? `${reward.discount_value}%`
+                            : `${reward.discount_value}$`})
+                        </s-text>
+                      )}
+                    </s-stack>
+                  </s-table-cell>
+                  <s-table-cell>
+                    <s-badge tone="info">{reward.points_cost} pts</s-badge>
+                  </s-table-cell>
+                  <s-table-cell>{reward._count?.redemptions || 0}</s-table-cell>
+                  <s-table-cell>
+                    <s-stack direction="inline" gap="small-200">
+                      <s-badge tone={reward.is_active ? "success" : "critical"}>
+                        {reward.is_active ? "Actif" : "Inactif"}
                       </s-badge>
-                    )}
-                    {reward.stock_limited && (
-                      <s-text color="subdued">
-                        Stock: {reward.stock_count ?? 0}
-                      </s-text>
-                    )}
-                    <s-text color="subdued">
-                      {reward._count?.redemptions || 0} échanges
-                    </s-text>
-                  </s-stack>
-
-                  {/* Actions */}
-                  <s-stack direction="inline" gap="small">
-                    <fetcher.Form method="post">
-                      <input type="hidden" name="intent" value="toggle" />
-                      <input type="hidden" name="id" value={reward.id} />
                       <s-button
                         variant="tertiary"
-                        onClick={(e: any) => {
-                          e.preventDefault();
+                        size="slim"
+                        onClick={() => {
                           fetcher.submit(
                             { intent: "toggle", id: reward.id },
-                            { method: "POST" },
+                            { method: "POST" }
                           );
                         }}
+                        disabled={isSubmitting}
                       >
                         {reward.is_active ? "Désactiver" : "Activer"}
                       </s-button>
-                    </fetcher.Form>
-                    <s-button
-                      variant="secondary"
-                      href={`/app/rewards/${reward.id}`}
-                    >
-                      Modifier
-                    </s-button>
-                    <fetcher.Form method="post">
-                      <input type="hidden" name="intent" value="delete" />
-                      <input type="hidden" name="id" value={reward.id} />
-                      <s-button
-                        variant="tertiary"
-                        tone="critical"
-                        onClick={(e: any) => {
-                          e.preventDefault();
-                          if (
-                            confirm(
-                              "Supprimer cette récompense? Les récompenses avec des échanges seront désactivées.",
-                            )
-                          ) {
-                            fetcher.submit(
-                              { intent: "delete", id: reward.id },
-                              { method: "POST" },
-                            );
-                          }
-                        }}
-                      >
-                        Supprimer
-                      </s-button>
-                    </fetcher.Form>
-                  </s-stack>
-                </s-stack>
-              </s-box>
-            ))}
-          </s-stack>
+                    </s-stack>
+                  </s-table-cell>
+                </s-table-row>
+              ))}
+            </s-table-body>
+          </s-table>
         ) : (
           <s-box padding="large">
             <s-stack direction="block" gap="base">
-              <s-text type="strong">Aucune récompense</s-text>
+              <s-heading>Aucune récompense</s-heading>
               <s-paragraph>
-                Créez votre première récompense pour que vos membres VIP puissent
+                Créez votre première récompense pour que vos clients puissent
                 échanger leurs points.
               </s-paragraph>
-              <s-button variant="primary" onClick={() => setShowForm(true)}>
+              <s-button variant="primary" commandFor="create-reward-modal">
                 Créer une récompense
               </s-button>
             </s-stack>
           </s-box>
         )}
+      </s-section>
+
+      {/* Create Modal */}
+      <s-modal id="create-reward-modal" heading="Nouvelle récompense">
+        <fetcher.Form method="post">
+          <input type="hidden" name="intent" value="create" />
+          <s-stack direction="block" gap="large">
+            <s-text-field
+              name="name_fr"
+              label="Nom de la récompense"
+              placeholder="Ex: Livraison gratuite"
+              required
+            />
+
+            <s-text-field
+              name="name"
+              label="Nom (anglais, optionnel)"
+              placeholder="Ex: Free shipping"
+            />
+
+            <s-select name="type" label="Type de récompense" required>
+              <s-option value="discount">Rabais en dollars</s-option>
+              <s-option value="percentage">Rabais en pourcentage</s-option>
+              <s-option value="shipping">Livraison gratuite</s-option>
+              <s-option value="product">Produit gratuit</s-option>
+            </s-select>
+
+            <s-text-field
+              name="points_cost"
+              label="Coût en points"
+              type="number"
+              placeholder="100"
+              required
+            />
+
+            <s-text-field
+              name="discount_value"
+              label="Valeur du rabais (optionnel)"
+              type="number"
+              placeholder="5.00 ou 10"
+            />
+
+            <s-select name="discount_type" label="Type de valeur">
+              <s-option value="">Non applicable</s-option>
+              <s-option value="fixed_amount">Montant fixe ($)</s-option>
+              <s-option value="percentage">Pourcentage (%)</s-option>
+            </s-select>
+
+            <s-select name="tier_required" label="Niveau requis">
+              <s-option value="">Tous les niveaux</s-option>
+              <s-option value="CLUB">Club minimum</s-option>
+              <s-option value="CLUB_PLUS">Club+ seulement</s-option>
+            </s-select>
+          </s-stack>
+
+          <s-button slot="primary-action" variant="primary" submit disabled={isSubmitting}>
+            {isSubmitting ? "Création..." : "Créer"}
+          </s-button>
+          <s-button slot="secondary-action" variant="secondary">
+            Annuler
+          </s-button>
+        </fetcher.Form>
+      </s-modal>
+
+      {/* Sidebar */}
+      <s-section slot="aside" heading="À propos">
+        <s-paragraph>
+          Les récompenses permettent à vos clients VIP d'échanger leurs points
+          contre des rabais. Les codes sont générés automatiquement.
+        </s-paragraph>
+      </s-section>
+
+      <s-section slot="aside" heading="Types">
+        <s-stack direction="block" gap="base">
+          <s-stack direction="block" gap="small-100">
+            <s-text type="strong">Rabais en $</s-text>
+            <s-text tone="subdued">Code pour X$ de rabais</s-text>
+          </s-stack>
+          <s-stack direction="block" gap="small-100">
+            <s-text type="strong">Rabais en %</s-text>
+            <s-text tone="subdued">Code pour X% de rabais</s-text>
+          </s-stack>
+          <s-stack direction="block" gap="small-100">
+            <s-text type="strong">Livraison</s-text>
+            <s-text tone="subdued">Livraison gratuite</s-text>
+          </s-stack>
+        </s-stack>
       </s-section>
     </s-page>
   );

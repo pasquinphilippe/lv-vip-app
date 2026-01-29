@@ -3,6 +3,7 @@ import type {
   LoaderFunctionArgs,
 } from "react-router";
 import { useLoaderData, useFetcher, useNavigate } from "react-router";
+import React from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
@@ -99,6 +100,17 @@ export default function RewardEditPage() {
   const { reward } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const navigate = useNavigate();
+
+  // Toast notifications on action completion
+  React.useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data) {
+      if (fetcher.data.success) {
+        shopify.toast.show(fetcher.data.message || "Récompense mise à jour", { duration: 3000 });
+      } else if (fetcher.data.error) {
+        shopify.toast.show(fetcher.data.error, { isError: true });
+      }
+    }
+  }, [fetcher.state, fetcher.data]);
 
   const isSubmitting =
     fetcher.state === "submitting" || fetcher.state === "loading";

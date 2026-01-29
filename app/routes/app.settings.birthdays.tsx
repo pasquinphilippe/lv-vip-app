@@ -180,7 +180,7 @@ export default function BirthdaysSettingsPage() {
               <s-checkbox
                 label="Activer les bonus d'anniversaire"
                 checked={birthdayEnabled}
-                onChange={(e) => setBirthdayEnabled(e.target.checked)}
+                onChange={(e) => setBirthdayEnabled((e.currentTarget as any).checked)}
               />
               <s-text color="subdued">
                 Les membres recevront des points bonus pendant leur periode d'anniversaire.
@@ -204,7 +204,7 @@ export default function BirthdaysSettingsPage() {
                   value={birthdayPoints}
                   min={0}
                   step={10}
-                  onChange={(e) => setBirthdayPoints(e.target.value)}
+                  onChange={(e) => setBirthdayPoints((e.currentTarget as any).value)}
                 />
               </s-stack>
               <s-stack direction="block" gap="base">
@@ -215,7 +215,7 @@ export default function BirthdaysSettingsPage() {
                   min={1}
                   max={30}
                   step={1}
-                  onChange={(e) => setBirthdayWindowDays(e.target.value)}
+                  onChange={(e) => setBirthdayWindowDays((e.currentTarget as any).value)}
                 />
                 <s-text color="subdued">
                   Nombre de jours avant et apres l'anniversaire ou le bonus peut etre reclame.

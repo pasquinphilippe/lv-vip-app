@@ -137,7 +137,7 @@ export default function TiersSettingsPage() {
                 value={thresholdClub}
                 min={0}
                 step={100}
-                onChange={(e) => setThresholdClub(e.target.value)}
+                onChange={(e) => setThresholdClub((e.currentTarget as any).value)}
               />
             </s-stack>
           </s-box>
@@ -150,7 +150,7 @@ export default function TiersSettingsPage() {
                 value={thresholdClubPlus}
                 min={0}
                 step={100}
-                onChange={(e) => setThresholdClubPlus(e.target.value)}
+                onChange={(e) => setThresholdClubPlus((e.currentTarget as any).value)}
               />
             </s-stack>
           </s-box>
@@ -172,7 +172,7 @@ export default function TiersSettingsPage() {
                   min={1}
                   max={10}
                   step={0.1}
-                  onChange={(e) => setMultiplierLite(e.target.value)}
+                  onChange={(e) => setMultiplierLite((e.currentTarget as any).value)}
                 />
               </s-stack>
               <s-stack direction="block" gap="base">
@@ -183,7 +183,7 @@ export default function TiersSettingsPage() {
                   min={1}
                   max={10}
                   step={0.1}
-                  onChange={(e) => setMultiplierClub(e.target.value)}
+                  onChange={(e) => setMultiplierClub((e.currentTarget as any).value)}
                 />
               </s-stack>
               <s-stack direction="block" gap="base">
@@ -194,7 +194,7 @@ export default function TiersSettingsPage() {
                   min={1}
                   max={10}
                   step={0.1}
-                  onChange={(e) => setMultiplierClubPlus(e.target.value)}
+                  onChange={(e) => setMultiplierClubPlus((e.currentTarget as any).value)}
                 />
               </s-stack>
             </s-stack>
@@ -214,7 +214,7 @@ export default function TiersSettingsPage() {
                 <s-select
                   label="Acces academie"
                   value={academyLite}
-                  onChange={(e) => setAcademyLite(e.target.value)}
+                  onChange={(e) => setAcademyLite((e.currentTarget as any).value)}
                 >
                   <option value="basic">Basique</option>
                   <option value="full">Complet</option>
@@ -226,7 +226,7 @@ export default function TiersSettingsPage() {
                 <s-select
                   label="Acces academie"
                   value={academyClub}
-                  onChange={(e) => setAcademyClub(e.target.value)}
+                  onChange={(e) => setAcademyClub((e.currentTarget as any).value)}
                 >
                   <option value="basic">Basique</option>
                   <option value="full">Complet</option>
@@ -238,7 +238,7 @@ export default function TiersSettingsPage() {
                 <s-select
                   label="Acces academie"
                   value={academyClubPlus}
-                  onChange={(e) => setAcademyClubPlus(e.target.value)}
+                  onChange={(e) => setAcademyClubPlus((e.currentTarget as any).value)}
                 >
                   <option value="basic">Basique</option>
                   <option value="full">Complet</option>
@@ -260,7 +260,7 @@ export default function TiersSettingsPage() {
             value={milestoneTierBonus}
             min={0}
             step={10}
-            onChange={(e) => setMilestoneTierBonus(e.target.value)}
+            onChange={(e) => setMilestoneTierBonus((e.currentTarget as any).value)}
           />
         </s-box>
       </s-section>

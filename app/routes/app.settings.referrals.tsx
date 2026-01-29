@@ -132,7 +132,7 @@ export default function ReferralsSettingsPage() {
               <s-checkbox
                 label="Activer le programme de parrainage"
                 checked={referralEnabled}
-                onChange={(e) => setReferralEnabled(e.target.checked)}
+                onChange={(e) => setReferralEnabled((e.currentTarget as any).checked)}
               />
               <s-text color="subdued">
                 Les membres pourront partager leur code de parrainage et recevoir des recompenses.
@@ -157,7 +157,7 @@ export default function ReferralsSettingsPage() {
                   value={referrerRewardPoints}
                   min={0}
                   step={10}
-                  onChange={(e) => setReferrerRewardPoints(e.target.value)}
+                  onChange={(e) => setReferrerRewardPoints((e.currentTarget as any).value)}
                 />
               </s-stack>
               <s-stack direction="block" gap="base">
@@ -168,7 +168,7 @@ export default function ReferralsSettingsPage() {
                   value={refereeRewardPoints}
                   min={0}
                   step={10}
-                  onChange={(e) => setRefereeRewardPoints(e.target.value)}
+                  onChange={(e) => setRefereeRewardPoints((e.currentTarget as any).value)}
                 />
               </s-stack>
             </s-stack>
@@ -187,7 +187,7 @@ export default function ReferralsSettingsPage() {
               value={referralMinPurchase}
               min={0}
               step={1}
-              onChange={(e) => setReferralMinPurchase(e.target.value)}
+              onChange={(e) => setReferralMinPurchase((e.currentTarget as any).value)}
             />
             <s-text color="subdued">
               Mettez 0 pour valider le parrainage des le premier achat,

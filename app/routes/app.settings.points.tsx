@@ -92,7 +92,7 @@ export default function PointsSettingsPage() {
             <s-checkbox
               label="Activer le programme de fidelite"
               checked={loyaltyEnabled}
-              onChange={(e) => setLoyaltyEnabled((e.currentTarget as HTMLInputElement).checked)}
+              onChange={(e) => setLoyaltyEnabled((e.currentTarget as any).checked)}
             />
             <s-text color="subdued">
               Lorsque desactive, aucun point ne sera accorde ou deduit.
@@ -115,7 +115,7 @@ export default function PointsSettingsPage() {
                 min={1}
                 max={10}
                 step={1}
-                onChange={(e) => setPointsPerDollar((e.currentTarget as HTMLInputElement).value)}
+                onChange={(e) => setPointsPerDollar((e.currentTarget as any).value)}
               />
               <s-text color="subdued">
                 Exemple: avec 1 point/dollar et un multiplicateur 2x (Club),
@@ -136,7 +136,7 @@ export default function PointsSettingsPage() {
             value={welcomeBonus}
             min={0}
             step={10}
-            onChange={(e) => setWelcomeBonus((e.currentTarget as HTMLInputElement).value)}
+            onChange={(e) => setWelcomeBonus((e.currentTarget as any).value)}
           />
         </s-box>
       </s-section>
@@ -155,7 +155,7 @@ export default function PointsSettingsPage() {
                   value={subscriptionNewPoints}
                   min={0}
                   step={5}
-                  onChange={(e) => setSubscriptionNewPoints(e.target.value)}
+                  onChange={(e) => setSubscriptionNewPoints((e.currentTarget as any).value)}
                 />
               </s-stack>
               <s-stack direction="block" gap="base">
@@ -165,7 +165,7 @@ export default function PointsSettingsPage() {
                   value={subscriptionRenewalPoints}
                   min={0}
                   step={5}
-                  onChange={(e) => setSubscriptionRenewalPoints(e.target.value)}
+                  onChange={(e) => setSubscriptionRenewalPoints((e.currentTarget as any).value)}
                 />
               </s-stack>
             </s-stack>
@@ -183,7 +183,7 @@ export default function PointsSettingsPage() {
             value={reactivationBonus}
             min={0}
             step={10}
-            onChange={(e) => setReactivationBonus(e.target.value)}
+            onChange={(e) => setReactivationBonus((e.currentTarget as any).value)}
           />
         </s-box>
       </s-section>
