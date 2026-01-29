@@ -2,12 +2,12 @@
 
 client_id = "551a199221a7521e32de9e48586bcef0"
 name = "LV-VIP-APP"
-application_url = "https://backend.lucvincent.com"
+application_url = "https://vip-app-production.up.railway.app"
 embedded = true
 handle = "lv-vip-app"
 
 [app_proxy]
-url = "https://backend.lucvincent.com"
+url = "https://vip-app-production.up.railway.app"
 subpath = "vip"
 prefix = "apps"
 
@@ -46,7 +46,7 @@ api_version = "2025-04"
 scopes = "read_customer_payment_methods,read_customers,read_discounts,read_orders,read_own_subscription_contracts,read_price_rules,read_products,write_customers,write_discounts,write_orders,write_own_subscription_contracts,write_price_rules"
 
 [auth]
-redirect_urls = [ "https://backend.lucvincent.com/auth/callback" ]
+redirect_urls = [ "https://vip-app-production.up.railway.app/auth/callback" ]
 
 [pos]
 embedded = false
