@@ -1,8 +1,10 @@
 import type { ShopSettings } from "./SettingsService";
+import type { vip_members } from "@prisma/client";
 
 export interface PurchasePointsInput {
   totalPrice: number;
-  isSubscriptionOrder: boolean;
+  isSubscriptionOrder?: boolean;
+  member?: vip_members;
   settings: ShopSettings;
 }
 
@@ -13,13 +15,15 @@ export interface SubscriptionMilestoneInput {
 
 /**
  * Calculate points earned from a purchase
+ * Applies member's tier multiplier if available
  * Simple hardcoded rates:
  * - Subscription orders: 200 points per dollar
  * - Regular orders: 100 points per dollar
  */
 export function calculatePurchasePoints({
   totalPrice,
-  isSubscriptionOrder,
+  isSubscriptionOrder = false,
+  member,
   settings,
 }: PurchasePointsInput): number {
   if (!settings.loyalty_enabled) {
@@ -30,7 +34,10 @@ export function calculatePurchasePoints({
     ? settings.subscription_points_per_dollar
     : settings.regular_points_per_dollar;
 
-  return Math.floor(totalPrice * pointsPerDollar);
+  // Apply tier multiplier if member is provided
+  const tierMultiplier = member?.points_multiplier || 1.0;
+
+  return Math.floor(totalPrice * pointsPerDollar * tierMultiplier);
 }
 
 /**
@@ -122,4 +129,50 @@ export function getMilestoneBonus(settings: ShopSettings): number {
   // Use subscription_milestone_bonus for tier upgrades as well
   // This could be made configurable separately in the future
   return settings.subscription_milestone_bonus || 500;
+}
+
+export interface SubscriptionPointsInput {
+  isNewSubscription: boolean;
+  settings: ShopSettings;
+}
+
+/**
+ * Calculate points for subscription events (new signup or renewal)
+ */
+export function calculateSubscriptionPoints({
+  isNewSubscription,
+  settings,
+}: SubscriptionPointsInput): number {
+  if (!settings.loyalty_enabled) {
+    return 0;
+  }
+
+  // New subscriptions get welcome bonus, renewals get milestone bonus
+  if (isNewSubscription) {
+    return settings.welcome_bonus || 0;
+  }
+
+  // Renewal points - use subscription milestone bonus
+  return settings.subscription_milestone_bonus || 500;
+}
+
+/**
+ * Calculate points for a new member's first purchase
+ * Includes welcome bonus if configured
+ */
+export function calculateNewMemberPurchasePoints(
+  totalPrice: number,
+  settings: ShopSettings
+): number {
+  if (!settings.loyalty_enabled) {
+    return 0;
+  }
+
+  // Base points from purchase (LITE rate)
+  const purchasePoints = Math.floor(totalPrice * settings.regular_points_per_dollar);
+  
+  // Add welcome bonus
+  const welcomeBonus = settings.welcome_bonus || 0;
+
+  return purchasePoints + welcomeBonus;
 }

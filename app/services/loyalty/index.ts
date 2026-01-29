@@ -16,9 +16,13 @@ export {
   calculateRegularPurchasePoints,
   calculateSubscriptionPurchasePoints,
   calculateSubscriptionMilestoneBonus,
+  calculateSubscriptionPoints,
+  calculateNewMemberPurchasePoints,
   getWelcomeBonus,
+  getMilestoneBonus,
   type PurchasePointsInput,
   type SubscriptionMilestoneInput,
+  type SubscriptionPointsInput,
 } from "./PointsCalculator";
 
 // Tier Manager

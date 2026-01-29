@@ -26,5 +26,5 @@ key = "show_earn_message"
 type = "boolean"
 name = "Show earn message for non-members"
 
-[[extensions.settings.fields.checking]]
-default = true
+[extensions.settings.fields.checking]
+default_value = true

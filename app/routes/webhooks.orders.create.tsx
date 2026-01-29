@@ -3,8 +3,7 @@ import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import {
   getShopSettings,
-  calculatePurchasePoints,
-  calculateNewMemberPurchasePoints,
+  calculateRegularPurchasePoints,
   checkAndUpgradeTier,
   processReferralReward,
   checkAndAwardBirthdayPoints,
@@ -27,6 +26,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return new Response(null, { status: 200 });
     }
 
+    // Check if this order is from a subscription (has subscription_contract_id)
+    // If so, skip - it's handled by the subscription webhook
+    const subscriptionContractId = payload.source_identifier || 
+      payload.subscription_contract_id ||
+      payload.note_attributes?.find((attr: { name: string }) => attr.name === "subscription_contract_id")?.value;
+
+    if (subscriptionContractId) {
+      console.log(`[Webhook] Order is from subscription ${subscriptionContractId}, skipping (handled by subscription webhook)`);
+      return new Response(null, { status: 200 });
+    }
+
     // Get shop settings (cached)
     const settings = await getShopSettings(shop);
 
@@ -41,12 +51,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (member) {
-      // Calculate points using dynamic settings
-      const earnedPoints = calculatePurchasePoints({
-        totalPrice,
-        member,
-        settings,
-      });
+      // Calculate points for regular order (100 pts per dollar)
+      const earnedPoints = calculateRegularPurchasePoints(totalPrice, settings);
 
       // Award points
       await db.loyalty_points_ledger.create({
@@ -54,7 +60,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           member_id: member.id,
           points: earnedPoints,
           action: "earn_purchase",
-          description: `Achat - Commande ${payload.name || payload.order_number}`,
+          description: `Achat - Commande ${payload.name || payload.order_number} (${totalPrice.toFixed(2)}$ × ${settings.regular_points_per_dollar} pts)`,
           reference_type: "order",
           reference_id: payload.admin_graphql_api_id,
         },
@@ -69,7 +75,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
       });
 
-      console.log(`[Webhook] Awarded ${earnedPoints} points to member ${member.id}`);
+      console.log(`[Webhook] Awarded ${earnedPoints} points to member ${member.id} (regular order)`);
 
       // Refetch member with updated points for tier check
       const updatedMember = await db.vip_members.findUnique({
@@ -129,15 +135,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         console.log(`[Webhook] Created referral event for code: ${referralCode}`);
       }
 
-      // Award first purchase points
-      const earnedPoints = calculateNewMemberPurchasePoints(totalPrice, settings);
+      // Award first purchase points (regular rate: 100 pts per dollar)
+      const earnedPoints = calculateRegularPurchasePoints(totalPrice, settings);
 
       await db.loyalty_points_ledger.create({
         data: {
           member_id: newMember.id,
           points: earnedPoints,
           action: "earn_purchase",
-          description: `Premier achat - Commande ${payload.name || payload.order_number}`,
+          description: `Premier achat - Commande ${payload.name || payload.order_number} (${totalPrice.toFixed(2)}$ × ${settings.regular_points_per_dollar} pts)`,
           reference_type: "order",
           reference_id: payload.admin_graphql_api_id,
         },
@@ -151,7 +157,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
       });
 
-      console.log(`[Webhook] Created new LITE member ${newMember.id} with ${earnedPoints} points`);
+      console.log(`[Webhook] Created new LITE member ${newMember.id} with ${earnedPoints} points (regular order)`);
 
       // Process referral if one was created
       if (referralCode) {
