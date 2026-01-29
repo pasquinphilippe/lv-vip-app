@@ -23,7 +23,7 @@ ssh $SERVER "mkdir -p $APP_DIR"
 
 # Pull latest code
 echo "📥 Récupération du code..."
-ssh $SERVER "cd $APP_DIR && git pull origin feature/vip-mvp-friday || git clone --branch feature/vip-mvp-friday https://github.com/pasquinphilippe/lv-vip-app.git ."
+ssh $SERVER "cd $APP_DIR && git pull origin main || git clone --branch main https://github.com/pasquinphilippe/lv-vip-app.git ."
 
 # Copy env file if it doesn't exist (you should have .env.production on the server)
 echo "🔐 Vérification des variables d'environnement..."
