@@ -1,0 +1,30 @@
+# Learn more about configuring your checkout UI extension at
+# https://shopify.dev/docs/api/checkout-ui-extensions
+
+api_version = "2024-10"
+
+[[extensions]]
+type = "ui_extension"
+name = "VIP Points Redemption"
+handle = "vip-points-redeem"
+
+[[extensions.targeting]]
+module = "./src/Checkout.tsx"
+target = "purchase.checkout.block.render"
+
+[extensions.capabilities]
+# Network access is required to fetch member data and submit redemptions
+network_access = true
+# Allow reading customer data
+api_access = true
+
+[extensions.settings]
+# Settings can be configured in theme editor
+
+[[extensions.settings.fields]]
+key = "show_earn_message"
+type = "boolean"
+name = "Show earn message for non-members"
+
+[[extensions.settings.fields.checking]]
+default = true

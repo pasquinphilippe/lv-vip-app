@@ -207,7 +207,15 @@ model shop_settings {
   tier_config             Json?     // { LITE: { multiplier: 1.5, academy: "basic" }, ... }
   milestone_tier_bonus    Int       @default(100)
 
-  // Points Earning
+  // Points Earning - Simplified
+  subscription_points_per_dollar  Int   @default(200)  // 200 pts per $1 on subscriptions
+  regular_points_per_dollar       Int   @default(100)  // 100 pts per $1 on regular orders
+  
+  // Subscription Milestones
+  subscription_milestone_months   Int   @default(3)    // Every X months = bonus
+  subscription_milestone_bonus    Int   @default(500)  // Bonus points amount
+  
+  // Legacy (keeping for migration)
   subscription_new_points     Int   @default(50)
   subscription_renewal_points Int   @default(25)
   reactivation_bonus          Int   @default(50)

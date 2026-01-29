@@ -1,0 +1,20 @@
+# Learn more about configuring your Customer Account UI extension at
+# https://shopify.dev/docs/api/customer-account-ui-extensions
+
+api_version = "2024-10"
+
+[[extensions]]
+type = "ui_extension"
+name = "Mes points VIP"
+handle = "vip-points-display"
+
+[[extensions.targeting]]
+module = "./src/BlockExtension.tsx"
+target = "customer-account.order-index.block.render"
+
+[extensions.capabilities]
+# Network access is required to fetch from app proxy
+network_access = true
+
+[extensions.settings]
+# No settings needed for now

@@ -109,3 +109,17 @@ export function getWelcomeBonus(settings: ShopSettings): number {
 
   return settings.welcome_bonus;
 }
+
+/**
+ * Get tier upgrade milestone bonus points
+ * Awarded when a member reaches a new tier
+ */
+export function getMilestoneBonus(settings: ShopSettings): number {
+  if (!settings.loyalty_enabled) {
+    return 0;
+  }
+
+  // Use subscription_milestone_bonus for tier upgrades as well
+  // This could be made configurable separately in the future
+  return settings.subscription_milestone_bonus || 500;
+}
