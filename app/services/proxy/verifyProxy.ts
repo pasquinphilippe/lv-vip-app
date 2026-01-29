@@ -35,9 +35,12 @@ export function verifyAppProxySignature(url: URL): boolean {
 }
 
 /**
- * Extract customer email from logged_in_customer_id param
- * Shopify sends this when the customer is logged in via App Proxy
+ * Extract customer ID from params
+ * - logged_in_customer_id: Shopify sends this when customer is logged in via App Proxy
+ * - customer_id: Extension sends this explicitly
  */
 export function getProxyCustomerId(url: URL): string | null {
-  return url.searchParams.get("logged_in_customer_id") || null;
+  return url.searchParams.get("logged_in_customer_id") 
+    || url.searchParams.get("customer_id") 
+    || null;
 }
