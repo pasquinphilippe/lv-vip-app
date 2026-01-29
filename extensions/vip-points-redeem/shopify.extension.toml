@@ -4,6 +4,7 @@
 api_version = "2024-10"
 
 [[extensions]]
+uid = "222496fe-45d0-63af-02e5-c82c54fd851942fcfe00"
 type = "ui_extension"
 name = "VIP Points Redemption"
 handle = "vip-points-redeem"
