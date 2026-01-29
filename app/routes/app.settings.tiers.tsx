@@ -1,3 +1,4 @@
+import React from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useActionData, useNavigation, useSubmit } from "react-router";
 import { useState, useEffect } from "react";
@@ -62,6 +63,13 @@ export default function TiersSettingsPage() {
   const submit = useSubmit();
 
   const isSubmitting = navigation.state === "submitting";
+
+  // Toast notification on save
+  useEffect(() => {
+    if (navigation.state === "idle" && actionData?.success) {
+      shopify.toast.show("Niveaux VIP sauvegardés", { duration: 3000 });
+    }
+  }, [navigation.state, actionData]);
 
   const thresholds = settings.tierThresholds;
   const config = settings.tierConfig;

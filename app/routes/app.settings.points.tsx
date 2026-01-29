@@ -1,3 +1,4 @@
+import React from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useActionData, useNavigation, useSubmit } from "react-router";
 import { useState, useEffect } from "react";
@@ -46,6 +47,13 @@ export default function PointsSettingsPage() {
   const [subscriptionNewPoints, setSubscriptionNewPoints] = useState(settings.subscription_new_points.toString());
   const [subscriptionRenewalPoints, setSubscriptionRenewalPoints] = useState(settings.subscription_renewal_points.toString());
   const [reactivationBonus, setReactivationBonus] = useState(settings.reactivation_bonus.toString());
+
+  // Toast notification on save
+  useEffect(() => {
+    if (navigation.state === "idle" && actionData?.success) {
+      shopify.toast.show("Paramètres sauvegardés", { duration: 3000 });
+    }
+  }, [navigation.state, actionData]);
 
   // Reset form when settings change (after successful save)
   useEffect(() => {

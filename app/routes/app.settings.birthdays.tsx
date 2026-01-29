@@ -1,3 +1,4 @@
+import React from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useActionData, useNavigation, useSubmit } from "react-router";
 import { useState, useEffect } from "react";
@@ -106,6 +107,13 @@ export default function BirthdaysSettingsPage() {
   const submit = useSubmit();
 
   const isSubmitting = navigation.state === "submitting";
+
+  // Toast notification on save
+  useEffect(() => {
+    if (navigation.state === "idle" && actionData?.success) {
+      shopify.toast.show("Paramètres anniversaire sauvegardés", { duration: 3000 });
+    }
+  }, [navigation.state, actionData]);
 
   // Controlled state for form fields
   const [birthdayEnabled, setBirthdayEnabled] = useState(settings.birthday_enabled);
