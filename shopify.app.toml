@@ -8,7 +8,7 @@ handle = "lv-vip-app"
 
 [app_proxy]
 url = "https://backend.lucvincent.com"
-subpath = "apps/vip"
+subpath = "vip"
 prefix = "apps"
 
 [build]

@@ -4,7 +4,6 @@
 api_version = "2025-04"
 
 [[extensions]]
-uid = "103921f5-67f1-dc5e-e81a-2440216c7e9da20d0fee"
 type = "ui_extension"
 name = "Mes points VIP"
 handle = "vip-points-display"
@@ -14,8 +13,4 @@ module = "./src/BlockExtension.tsx"
 target = "customer-account.order-index.block.render"
 
 [extensions.capabilities]
-# Network access is required to fetch from app proxy
 network_access = true
-
-[extensions.settings]
-# No settings needed for now
