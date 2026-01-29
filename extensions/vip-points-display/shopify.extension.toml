@@ -4,6 +4,7 @@
 api_version = "2025-04"
 
 [[extensions]]
+uid = "103921f5-67f1-dc5e-e81a-2440216c7e9da20d0fee"
 type = "ui_extension"
 name = "Mes points VIP"
 handle = "vip-points-display"
